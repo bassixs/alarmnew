@@ -1,0 +1,92 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# aialarm — конфигурация проекта. Скопируйте в config.yaml и заполните.
+# Секреты (токены/ключи) держите в .env, а НЕ здесь.
+# ─────────────────────────────────────────────────────────────────────────────
+project_name: "aialarm"
+
+channels:
+  telegram: ""            # @username канала или числовой chat_id (-100...)
+  max: ""                 # id канала в MAX
+
+sources:
+  - type: rss             # rss | telegram | scrape | aggregator
+    url: "https://example-region-smi.ru/rss"
+    region: "Регион"
+    poll_interval_min: 15 # как часто опрашивать этот источник
+    enabled: true
+  - type: telegram
+    url: "some_regional_channel"   # username публичного канала (без @)
+    region: "Регион"
+    poll_interval_min: 20
+    enabled: false        # включить после настройки Telethon-сессии
+  - type: aggregator      # Google News RSS по региону — только для обнаружения инфоповодов
+    url: "https://news.google.com/rss/search?q=Регион&hl=ru&gl=RU&ceid=RU:ru"
+    region: "Регион"
+    poll_interval_min: 30
+    enabled: true
+
+# Тезисы/темы, под которые фильтруем новости
+theses:
+  - "Развитие и благоустройство региона"
+  - "Социальная поддержка жителей"
+
+# Стоп-слова/темы: новости с этими темами НИКОГДА не публикуются автоматически.
+# Они не отбрасываются молча, а попадают в очередь ручной модерации (см. sensitive).
+exclude_keywords:
+  - "смертельный"
+  - "погиб"
+
+# Чувствительные темы -> принудительная ручная модерация (fallback, не тихий дроп)
+sensitive_keywords:
+  - "ДТП"
+  - "пострадав"
+  - "уголовн"
+  - "суд"
+
+tone_of_voice: >
+  Тёплый, человеческий, но без панибратства. Короткие абзацы, факты вперёд.
+  Уместны 1-2 эмодзи. Без канцелярита и кликбейта.
+# Примеры характерных постов канала (3-5 шт.) — сильно улучшают рерайт:
+tone_examples:
+  - ""
+  - ""
+
+post_length: "600-900 знаков"
+posting_frequency: "3-5 постов в день"
+
+# ── Фильтрация ───────────────────────────────────────────────────────────────
+filter:
+  strategy: "prefilter_then_llm"   # prefilter_then_llm | llm_only | prefilter_only
+  embed_relevance_min: 0.35        # порог семантической близости к тезисам (префильтр)
+  llm_confidence_min: 70           # порог уверенности LLM для публикации
+  dedup_cosine_threshold: 0.85     # выше -> считаем дублем
+
+# ── Модерация ────────────────────────────────────────────────────────────────
+moderation:
+  enabled: true
+  mode: "all"                      # all | sensitive_only | off
+  admin_chat_id: 0                 # chat_id администратора/закрытого чата (int)
+  auto_publish_after_min: 0        # 0 = не автопубликовать по таймауту; >0 — только для низкорисковых
+  auto_publish_low_risk_on_timeout: false
+
+# ── Публикация ───────────────────────────────────────────────────────────────
+publish:
+  targets: ["telegram"]            # какие площадки активны: telegram, max
+  max_posts_per_day: 5
+  min_minutes_between_posts: 20
+  attribution_template: "по данным {source}"
+  ai_disclosure: ""                # маркировка ИИ-контента (см. README, требования РФ) — заполнить при необходимости
+
+# ── LLM (через OpenAI-совместимый шлюз AiTunnel; ключ в .env) ─────────────────
+llm:
+  # Список моделей и цены: https://aitunnel.ru/models
+  classify_model: "minimax-m3"         # поток/дёшево ~60/240 ₽ за 1M (альт: gemini-2.5-flash)
+  rewrite_model: "claude-sonnet-4.5"   # качество ~600/3000 ₽ (дешевле: glm-5.2; топ: opus-4.5)
+  combined_call: false             # true -> фильтр+рерайт одним вызовом (экономия)
+  max_tokens: 1500
+  temperature: 0.3
+
+# ── MAX (значения меняются — сверяйтесь с dev.max.ru перед запуском) ──────────
+max_platform:
+  base_url: "https://botapi.max.ru"   # вынесено в конфиг: домены MAX мигрировали
+  auth_header: "Authorization"
