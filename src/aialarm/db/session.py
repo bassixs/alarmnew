@@ -27,7 +27,7 @@ def _get_factory() -> sessionmaker:
             def _sqlite_pragmas(dbapi_conn, _rec):  # noqa: ANN001
                 cur = dbapi_conn.cursor()
                 cur.execute("PRAGMA journal_mode=WAL")
-                cur.execute("PRAGMA busy_timeout=5000")
+                cur.execute("PRAGMA busy_timeout=15000")
                 cur.execute("PRAGMA synchronous=NORMAL")
                 cur.close()
         _SessionFactory = sessionmaker(bind=_engine, expire_on_commit=False, future=True)

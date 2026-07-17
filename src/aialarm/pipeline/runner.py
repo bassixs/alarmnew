@@ -18,26 +18,30 @@ from aialarm.publishers.service import run_publish_stage
 log = get_logger(__name__)
 
 
-async def _collect_source(cfg: SourceCfg) -> int:
+async def _fetch_source(cfg: SourceCfg):
     try:
-        collector = build_collector(cfg)
-        items = await collector.collect()
-        stats = store_items(items)
-        return stats["inserted"]
+        return await build_collector(cfg).collect()
     except Exception as e:  # noqa: BLE001
         log.error("collect_source_failed", url=cfg.url, error=str(e))
-        return 0
+        return []
 
 
 async def run_collection(only_source_url: str | None = None) -> dict[str, int]:
-    """Собрать со всех включённых источников (или одного конкретного)."""
+    """Собрать со всех включённых источников. Скачиваем каналы параллельно, но пишем в БД
+    ПОСЛЕДОВАТЕЛЬНО — иначе параллельные записи в SQLite дают 'database is locked'."""
     sources = get_settings().project.sources
     active = [
         s for s in sources
         if s.enabled and (only_source_url is None or s.url == only_source_url)
     ]
-    results = await asyncio.gather(*[_collect_source(s) for s in active])
-    total = {"sources": len(active), "inserted": sum(results)}
+    fetched = await asyncio.gather(*[_fetch_source(s) for s in active])
+    inserted = 0
+    for items in fetched:
+        try:
+            inserted += store_items(items)["inserted"]
+        except Exception as e:  # noqa: BLE001
+            log.error("store_items_failed", error=str(e))
+    total = {"sources": len(active), "inserted": inserted}
     log.info("collection_done", **total)
     return total
 

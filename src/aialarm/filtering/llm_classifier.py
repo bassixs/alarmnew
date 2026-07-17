@@ -29,6 +29,8 @@ _SYSTEM = """Ты — редактор регионального новостн
 частные объявления, а также федеральные/иногородние новости без прямой связи с
 Калужской областью.
 confidence отражает и релевантность, и значимость новости для канала.
+Отвечай КРАТКО: matched_thesis — короткое название темы (2-4 слова), НЕ переписывай тезис
+целиком; reason — одно короткое предложение (до 15 слов).
 Ответь строго по схеме инструмента."""
 
 
@@ -50,7 +52,7 @@ def classify(title: str, body: str) -> ClassifyResult:
         system=system,
         user=user,
         schema=_SCHEMA,
-        max_tokens=400,
+        max_tokens=1000,  # minimax пишет многословно; тесно -> обрезка JSON
     )
     return ClassifyResult(
         relevant=bool(data.get("relevant")),

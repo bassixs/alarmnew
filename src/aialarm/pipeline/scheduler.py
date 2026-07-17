@@ -9,6 +9,8 @@
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 from aialarm.config import get_settings
@@ -35,21 +37,19 @@ def build_scheduler() -> BlockingScheduler:
     proj = get_settings().project
     sched = BlockingScheduler(timezone="UTC")
 
-    for src in proj.sources:
-        if not src.enabled:
-            continue
-        sched.add_job(
-            run_collection_sync,
-            "interval",
-            minutes=max(1, src.poll_interval_min),
-            kwargs={"only_source_url": src.url},
-            id=f"collect::{src.url}",
-            max_instances=1,
-            coalesce=True,
-        )
+    # Одна задача сбора со всех источников (внутри — параллельный fetch, последовательная
+    # запись). Отдельные задачи на источник давали конкурентные записи и 'database is locked'.
+    now = datetime.now(timezone.utc)
+    intervals = [s.poll_interval_min for s in proj.sources if s.enabled]
+    collect_interval = min(intervals) if intervals else 20
+    # next_run_time -> первый запуск вскоре после старта (не ждём полный интервал).
+    sched.add_job(run_collection_sync, "interval", minutes=max(1, collect_interval),
+                  id="collect", max_instances=1, coalesce=True,
+                  next_run_time=now + timedelta(seconds=5))
 
     sched.add_job(_processing_job, "interval", minutes=PROCESS_INTERVAL_MIN, id="processing",
-                  max_instances=1, coalesce=True)
+                  max_instances=1, coalesce=True,
+                  next_run_time=now + timedelta(seconds=45))
     sched.add_job(
         run_publish_stage,
         "interval",
