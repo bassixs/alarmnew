@@ -12,9 +12,8 @@ from aialarm.collectors import build_collector, store_items
 from aialarm.config import SourceCfg, get_settings
 from aialarm.filtering import run_filter_stage
 from aialarm.logging import get_logger
-from aialarm.moderation.service import route_after_rewrite
+from aialarm.moderation.service import route_previews
 from aialarm.publishers.service import run_publish_stage
-from aialarm.rewrite import run_rewrite_stage
 
 log = get_logger(__name__)
 
@@ -48,11 +47,11 @@ def run_collection_sync(only_source_url: str | None = None) -> dict[str, int]:
 
 
 def run_processing() -> dict[str, dict]:
-    """Стадии после сбора: фильтр -> рерайт -> маршрутизация модерации -> публикация."""
+    """Стадии после сбора: фильтр -> карточки-оригиналы на модерацию -> публикация
+    одобренных. Рерайт (Sonnet) — по кнопке «Переписать» в боте, не здесь."""
     result = {
         "filter": run_filter_stage(),
-        "rewrite": run_rewrite_stage(),
-        "moderation": route_after_rewrite(),
+        "preview": route_previews(),
         "publish": run_publish_stage(),
     }
     return result

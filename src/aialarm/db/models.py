@@ -37,9 +37,10 @@ class NewsStatus(str, enum.Enum):
     DUPLICATE = "duplicate"        # отброшена дедупом
     FILTERED_OUT = "filtered_out"  # не прошла фильтр релевантности
     EXCLUDED = "excluded"          # попала под exclude_keywords
-    RELEVANT = "relevant"          # прошла фильтр, ждёт рерайта
+    RELEVANT = "relevant"          # прошла фильтр, ждёт отправки оригинала на модерацию
+    PREVIEW = "preview"            # оригинал отправлен, ждёт решения переписать/отменить
     REWRITTEN = "rewritten"        # есть черновик поста
-    MODERATION = "moderation"      # ждёт решения модератора
+    MODERATION = "moderation"      # готовый пост ждёт решения опубликовать/править/отклонить
     APPROVED = "approved"          # одобрено к публикации
     REJECTED = "rejected"          # отклонено модератором
     PUBLISHED = "published"        # опубликовано хотя бы на одну площадку

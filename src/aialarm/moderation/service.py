@@ -43,41 +43,94 @@ def _is_sensitive(session: Session, raw_id: int) -> bool:
     return bool(fn and fn.is_sensitive)
 
 
-def route_after_rewrite(limit: int = 50) -> dict[str, int]:
-    """REWRITTEN -> MODERATION (с уведомлением) или APPROVED."""
-    from aialarm.moderation.notify import send_card
+def route_previews(limit: int = 50) -> dict[str, int]:
+    """RELEVANT -> PREVIEW: шлём модератору ОРИГИНАЛ (без рерайта) с кнопками
+    «Переписать»/«Отменить». Рерайт (Sonnet) откладывается до нажатия «Переписать» —
+    не тратим деньги на посты, которые не возьмут."""
+    from aialarm.moderation.notify import send_preview
 
-    stats = {"to_moderation": 0, "auto_approved": 0}
+    stats = {"to_preview": 0, "auto_approved": 0}
     to_notify: list[int] = []
     with session_scope() as session:
         rows = session.scalars(
-            select(RawNews).where(RawNews.status == NewsStatus.REWRITTEN).limit(limit)
+            select(RawNews).where(RawNews.status == NewsStatus.RELEVANT).limit(limit)
         ).all()
         for raw in rows:
             if _needs_moderation(session, raw):
-                raw.status = NewsStatus.MODERATION
-                stats["to_moderation"] += 1
-                post = session.scalar(select(RewrittenPost).where(RewrittenPost.raw_id == raw.id))
-                if post:
-                    to_notify.append(post.id)
+                raw.status = NewsStatus.PREVIEW
+                stats["to_preview"] += 1
+                to_notify.append(raw.id)
             else:
+                # Автопубликация без модерации: переписываем сразу и одобряем.
+                from aialarm.rewrite.rewriter import rewrite_one
+
+                rewrite_one(session, raw)
                 raw.status = NewsStatus.APPROVED
                 stats["auto_approved"] += 1
 
-    # Уведомления шлём вне транзакции, чтобы сетевые сбои не откатывали статусы.
-    # Throttle ~4с между карточками: у Telegram лимит ~20 сообщений/мин в один чат.
+    # Throttle ~4с между карточками: лимит мессенджеров ~20 сообщений/мин в один чат.
     import time
 
-    for i, post_id in enumerate(to_notify):
+    for i, raw_id in enumerate(to_notify):
         if i:
             time.sleep(4)
         try:
-            send_card(post_id)
+            send_preview(raw_id)
         except Exception as e:  # noqa: BLE001
-            log.error("moderation_notify_failed", post_id=post_id, error=str(e))
+            log.error("preview_notify_failed", raw_id=raw_id, error=str(e))
 
-    log.info("moderation_routing_done", **stats)
+    log.info("preview_routing_done", **stats)
     return stats
+
+
+def rewrite_and_get(raw_id: int) -> int | None:
+    """По нажатию «Переписать»: переписываем оригинал (Sonnet), возвращаем post_id
+    готового поста. Если уже переписан — возвращаем существующий (без повтора)."""
+    from aialarm.rewrite.rewriter import rewrite_one
+
+    done = {NewsStatus.REWRITTEN, NewsStatus.MODERATION, NewsStatus.APPROVED, NewsStatus.PUBLISHED}
+    with session_scope() as session:
+        raw = session.get(RawNews, raw_id)
+        if not raw:
+            return None
+        existing = session.scalar(select(RewrittenPost).where(RewrittenPost.raw_id == raw_id))
+        if existing and raw.status in done:
+            return existing.id
+        rp = existing or rewrite_one(session, raw)
+        raw.status = NewsStatus.MODERATION  # готовый пост ждёт опубликовать/править/отклонить
+        session.flush()
+        log.info("preview_rewritten", raw_id=raw_id, post_id=rp.id)
+        return rp.id
+
+
+def cancel_preview(raw_id: int) -> bool:
+    """По нажатию «Отменить»: отклоняем новость (сообщение удаляет бот)."""
+    with session_scope() as session:
+        raw = session.get(RawNews, raw_id)
+        if not raw:
+            return False
+        raw.status = NewsStatus.REJECTED
+        log.info("preview_cancelled", raw_id=raw_id)
+        return True
+
+
+def get_preview(raw_id: int) -> dict | None:
+    """Данные карточки-оригинала для модератора."""
+    with session_scope() as session:
+        raw = session.get(RawNews, raw_id)
+        if not raw:
+            return None
+        fn = session.scalar(select(FilteredNews).where(FilteredNews.raw_id == raw_id))
+        return {
+            "raw_id": raw.id,
+            "title": raw.title,
+            "body": raw.body,
+            "source_url": raw.source_url,
+            "confidence": fn.confidence if fn else 0,
+            "matched_thesis": fn.matched_thesis if fn else "",
+            "is_sensitive": fn.is_sensitive if fn else False,
+            "has_image": bool(raw.image_url),
+        }
 
 
 # ── Операции, вызываемые из бота ─────────────────────────────────────────────

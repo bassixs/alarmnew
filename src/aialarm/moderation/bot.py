@@ -38,6 +38,29 @@ def build_dispatcher() -> Dispatcher:
             "Впишите его в config.yaml -> moderation.admin_chat_id."
         )
 
+    @dp.callback_query(F.data.startswith("pre:"))
+    async def on_preview(cq: CallbackQuery) -> None:
+        _, action, raw_id_s = cq.data.split(":")
+        raw_id = int(raw_id_s)
+        if action == "rewrite":
+            await cq.answer("Переписываю…")
+            post_id = await asyncio.to_thread(service.rewrite_and_get, raw_id)
+            try:
+                await cq.message.delete()
+            except Exception:  # noqa: BLE001
+                pass
+            if post_id:
+                from aialarm.moderation.notify import send_card
+
+                await asyncio.to_thread(send_card, post_id)
+        elif action == "cancel":
+            service.cancel_preview(raw_id)
+            try:
+                await cq.message.delete()
+            except Exception:  # noqa: BLE001
+                pass
+            await cq.answer("Отменено")
+
     @dp.callback_query(F.data.startswith("mod:"))
     async def on_action(cq: CallbackQuery, state: FSMContext) -> None:
         _, action, post_id_s = cq.data.split(":")

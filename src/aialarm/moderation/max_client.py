@@ -49,6 +49,17 @@ def get_updates(marker: int | None = None, timeout: int = 30) -> dict:
     return r.json()
 
 
+def delete_message(mid: str) -> None:
+    base, token, auth = _conn()
+    try:
+        r = httpx.delete(
+            f"{base}/messages", params={"message_id": mid}, headers={auth: token}, timeout=20
+        )
+        r.raise_for_status()
+    except Exception as e:  # noqa: BLE001
+        log.warning("max_delete_failed", error=str(e))
+
+
 def answer_callback(callback_id: str, notification: str | None = None) -> None:
     base, token, auth = _conn()
     body: dict = {}
@@ -68,11 +79,21 @@ def answer_callback(callback_id: str, notification: str | None = None) -> None:
 
 
 def callback_buttons(post_id: int) -> list:
-    """Клавиатура карточки модерации (одна строка из трёх callback-кнопок)."""
+    """Клавиатура готового поста (шаг 2): опубликовать/править/отклонить."""
     return [
         [
             {"type": "callback", "text": "✅ Опубликовать", "payload": f"mod:approve:{post_id}"},
             {"type": "callback", "text": "✏️ Править", "payload": f"mod:edit:{post_id}"},
             {"type": "callback", "text": "❌ Отклонить", "payload": f"mod:reject:{post_id}"},
+        ]
+    ]
+
+
+def preview_buttons(raw_id: int) -> list:
+    """Клавиатура карточки-оригинала (шаг 1): переписать/отменить."""
+    return [
+        [
+            {"type": "callback", "text": "✍️ Переписать", "payload": f"pre:rewrite:{raw_id}"},
+            {"type": "callback", "text": "🗑 Отменить", "payload": f"pre:cancel:{raw_id}"},
         ]
     ]

@@ -13,12 +13,12 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 
 from aialarm.config import get_settings
 from aialarm.db import init_db
+from aialarm.collectors.images import cleanup_old
 from aialarm.filtering import run_filter_stage
 from aialarm.logging import configure_logging, get_logger
-from aialarm.moderation.service import route_after_rewrite
+from aialarm.moderation.service import route_previews
 from aialarm.pipeline.runner import run_collection_sync
 from aialarm.publishers.service import run_publish_stage
-from aialarm.rewrite import run_rewrite_stage
 
 log = get_logger(__name__)
 
@@ -27,8 +27,8 @@ PROCESS_INTERVAL_MIN = 5
 
 def _processing_job() -> None:
     run_filter_stage()
-    run_rewrite_stage()
-    route_after_rewrite()
+    route_previews()          # шлём оригиналы на модерацию; рерайт — по кнопке «Переписать»
+    cleanup_old(days=2)       # чистим старые скачанные картинки
 
 
 def build_scheduler() -> BlockingScheduler:
