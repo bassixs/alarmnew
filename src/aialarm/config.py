@@ -10,7 +10,7 @@ from functools import lru_cache
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -29,6 +29,14 @@ class Secrets(BaseSettings):
     max_bot_token: str = Field(default="", alias="MAX_BOT_TOKEN")
     database_url: str = Field(default="sqlite:///./aialarm.db", alias="DATABASE_URL")
     config_path: str = Field(default="./config.yaml", alias="AIALARM_CONFIG")
+
+    @field_validator("telegram_api_id", mode="before")
+    @classmethod
+    def _blank_to_none(cls, v):
+        # Пустая строка в .env (TELEGRAM_API_ID=) -> None, а не ошибка парсинга int.
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return v
 
 
 # ── Параметры проекта (YAML) ─────────────────────────────────────────────────
