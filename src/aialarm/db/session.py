@@ -4,7 +4,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Iterator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
 from aialarm.config import get_settings
@@ -18,8 +18,18 @@ def _get_factory() -> sessionmaker:
     global _engine, _SessionFactory
     if _SessionFactory is None:
         url = get_settings().secrets.database_url
-        connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
+        is_sqlite = url.startswith("sqlite")
+        connect_args = {"check_same_thread": False} if is_sqlite else {}
         _engine = create_engine(url, future=True, connect_args=connect_args)
+        if is_sqlite:
+            # WAL + busy_timeout: планировщик и бот пишут в БД параллельно без блокировок.
+            @event.listens_for(_engine, "connect")
+            def _sqlite_pragmas(dbapi_conn, _rec):  # noqa: ANN001
+                cur = dbapi_conn.cursor()
+                cur.execute("PRAGMA journal_mode=WAL")
+                cur.execute("PRAGMA busy_timeout=5000")
+                cur.execute("PRAGMA synchronous=NORMAL")
+                cur.close()
         _SessionFactory = sessionmaker(bind=_engine, expire_on_commit=False, future=True)
     return _SessionFactory
 
