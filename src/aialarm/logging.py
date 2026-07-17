@@ -9,6 +9,9 @@ import structlog
 
 def configure_logging(level: str = "INFO") -> None:
     logging.basicConfig(format="%(message)s", stream=sys.stdout, level=level)
+    # Гасим шумные библиотеки (httpx логирует каждый запрос).
+    for noisy in ("httpx", "httpcore", "aiogram.event", "apscheduler.executors.default"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,

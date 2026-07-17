@@ -113,12 +113,15 @@ def run() -> None:
             log.warning("max_updates_failed", error=str(e))
             time.sleep(3)
             continue
-        for upd in data.get("updates", []):
+        updates = data.get("updates", [])
+        for upd in updates:
             try:
                 _dispatch(upd)
             except Exception as e:  # noqa: BLE001
                 log.error("max_update_handle_failed", error=str(e))
         marker = data.get("marker", marker)
+        if not updates:
+            time.sleep(2)  # long-poll не всегда держит соединение — не молотим API вхолостую
 
 
 def main() -> None:
