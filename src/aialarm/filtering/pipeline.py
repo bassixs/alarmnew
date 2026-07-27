@@ -46,10 +46,11 @@ def filter_one(session: Session, raw: RawNews) -> FilteredNews:
     else:  # prefilter_then_llm и префильтр не прошёл
         reason = f"prefilter score={score:.2f} < {fcfg.embed_relevance_min}"
 
-    # Чувствительные новости (криминал/ДТП/суд/ЧП/exclude по ключевым словам) ВСЕГДА идут
-    # на модерацию — даже если LLM счёл их нерелевантными: редактор решает сам, не роняем
-    # молча. Обычные новости проходят при релевантности и уверенности выше порога.
-    passes = is_sensitive or (relevant and confidence >= fcfg.llm_confidence_min)
+    # Проходит только релевантное и достаточно значимое (LLM confidence >= порог).
+    # Криминал/ДТП/ЧП оцениваются по значимости так же: мелкое отсекается, крупное проходит.
+    # Флаг is_sensitive не пропускает автоматически — он лишь принудит модерацию (не
+    # автопубликацию) для тех sensitive-новостей, что прошли порог.
+    passes = relevant and confidence >= fcfg.llm_confidence_min
 
     filtered = FilteredNews(
         raw_id=raw.id,
