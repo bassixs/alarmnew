@@ -94,15 +94,15 @@ def send_card(post_id: int) -> None:
 
 # ── Карточка-оригинал (шаг 1): «Переписать» / «Отменить» ─────────────────────
 def _preview_text(p: dict) -> str:
-    flag = "⚠️ ЧУВСТВИТЕЛЬНАЯ ТЕМА\n" if p["is_sensitive"] else ""
-    photo = "🖼 есть фото\n" if p["has_image"] else ""
-    meta = (
-        f"📰 ОРИГИНАЛ (не переписан)\n{flag}{photo}"
-        f"📊 confidence: {p['confidence']} | тезис: {p['matched_thesis']}\n"
-        f"🔗 источник: {p['source_url']}\n{'─' * 20}\n"
-    )
-    body = f"{p['title']}\n\n{p['body']}"
-    return (meta + body)[:_CARD_LIMIT]
+    sep = "─" * 20
+    head = ["❗ ОРИГИНАЛ (не переписан)"]
+    if p["is_sensitive"]:
+        head.append("⚠️ ЧУВСТВИТЕЛЬНАЯ ТЕМА")
+    if p["has_image"]:
+        head.append("🖼 есть фото")
+    # body уже содержит заголовок первой строкой — title отдельно НЕ добавляем (иначе дубль).
+    meta = "\n".join(head) + f"\n{sep}\n🔗 источник: {p['source_url']}\n{sep}\n\n"
+    return (meta + p["body"])[:_CARD_LIMIT]
 
 
 def _preview_keyboard_tg(raw_id: int) -> InlineKeyboardMarkup:
