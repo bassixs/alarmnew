@@ -22,6 +22,7 @@ from aialarm.db.models import (
 )
 from aialarm.logging import get_logger
 from aialarm.publishers.base import Post, get_publisher
+from aialarm.source_policy import visual_allowed
 
 log = get_logger(__name__)
 
@@ -61,7 +62,11 @@ def can_publish_now(session: Session) -> tuple[bool, str]:
 
 
 def _to_post(rp: RewrittenPost) -> Post:
-    image = rp.raw.image_url if rp.raw else None
+    image = (
+        rp.raw.image_url
+        if rp.raw and visual_allowed(rp.raw.source_url)
+        else None
+    )
     return Post(text=rp.post_text, image_url=image, hashtags=list(rp.hashtags or []))
 
 

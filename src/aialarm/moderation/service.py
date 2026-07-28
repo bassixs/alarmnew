@@ -22,6 +22,7 @@ from aialarm.config import get_settings
 from aialarm.db import session_scope
 from aialarm.db.models import FilteredNews, NewsStatus, RawNews, RewrittenPost
 from aialarm.logging import get_logger
+from aialarm.source_policy import visual_policy
 
 log = get_logger(__name__)
 
@@ -125,6 +126,7 @@ def get_preview(raw_id: int) -> dict | None:
         if not raw:
             return None
         fn = session.scalar(select(FilteredNews).where(FilteredNews.raw_id == raw_id))
+        allow_visual, visual_warning = visual_policy(raw.source_url)
         return {
             "raw_id": raw.id,
             "title": raw.title,
@@ -133,7 +135,8 @@ def get_preview(raw_id: int) -> dict | None:
             "confidence": fn.confidence if fn else 0,
             "matched_thesis": fn.matched_thesis if fn else "",
             "is_sensitive": fn.is_sensitive if fn else False,
-            "has_image": bool(raw.image_url),
+            "has_image": bool(raw.image_url) and allow_visual,
+            "visual_warning": visual_warning,
         }
 
 
@@ -179,6 +182,7 @@ def get_pending(post_id: int) -> dict | None:
         if not rp or not rp.raw:
             return None
         fn = session.scalar(select(FilteredNews).where(FilteredNews.raw_id == rp.raw_id))
+        _, visual_warning = visual_policy(rp.raw.source_url)
         return {
             "post_id": rp.id,
             "post_text": rp.post_text,
@@ -187,4 +191,5 @@ def get_pending(post_id: int) -> dict | None:
             "confidence": fn.confidence if fn else 0,
             "matched_thesis": fn.matched_thesis if fn else "",
             "is_sensitive": fn.is_sensitive if fn else False,
+            "visual_warning": visual_warning,
         }

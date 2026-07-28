@@ -46,6 +46,8 @@ class SourceCfg(BaseModel):
     region: str = ""
     poll_interval_min: int = 15
     enabled: bool = True
+    allow_visual: bool = True
+    visual_warning: str = ""
     extra: dict = Field(default_factory=dict)  # напр. {"selectors": {"body": "div.article"}}
 
 

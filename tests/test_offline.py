@@ -6,6 +6,7 @@ from aialarm.collectors.dedup import dedup_text
 from aialarm.filtering.rules import check_rules
 from aialarm.llm.embeddings import HashingTfidfEmbedder, cosine
 from aialarm.publishers.base import Post
+from aialarm.source_policy import source_matches
 
 
 def test_dedup_key_stable_and_case_insensitive():
@@ -50,3 +51,9 @@ def test_post_render_with_hashtags_and_limit():
     rendered = p.rendered_text(1000)
     assert "#город" in rendered and "#новости" in rendered
     assert len(Post(text="a" * 100).rendered_text(10)) == 10
+
+
+def test_source_matches_telegram_post_url():
+    assert source_matches("Evgeniy_Serkin", "https://t.me/Evgeniy_Serkin/123")
+    assert source_matches("https://t.me/s/Evgeniy_Serkin", "https://t.me/Evgeniy_Serkin/456")
+    assert not source_matches("Evgeniy_Serkin", "https://t.me/another_channel/123")

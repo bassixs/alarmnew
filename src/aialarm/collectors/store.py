@@ -11,6 +11,7 @@ from aialarm.db import session_scope
 from aialarm.db.models import NewsStatus, RawNews
 from aialarm.llm.embeddings import get_embedder
 from aialarm.logging import get_logger
+from aialarm.source_policy import visual_allowed
 
 log = get_logger(__name__)
 
@@ -34,7 +35,11 @@ def store_items(items: list[CollectedItem]) -> dict[str, int]:
             dup_id, score = find_semantic_duplicate(session, emb, threshold)
 
             # Качаем фото сразу (ссылки превью t.me быстро истекают) -> локальный путь.
-            image_ref = download_and_store(item.image_url, key) if item.image_url else None
+            image_ref = (
+                download_and_store(item.image_url, key)
+                if item.image_url and visual_allowed(item.source_url)
+                else None
+            )
 
             row = RawNews(
                 dedup_key=key,
@@ -66,5 +71,5 @@ def _maybe_enrich_original(session, original_id: int, item: CollectedItem) -> No
     original = session.get(RawNews, original_id)
     if original and len(item.body or "") > len(original.body or ""):
         original.body = item.body
-        if item.image_url and not original.image_url:
+        if item.image_url and visual_allowed(item.source_url) and not original.image_url:
             original.image_url = item.image_url

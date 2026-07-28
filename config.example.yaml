@@ -14,6 +14,8 @@ sources:
     region: "Регион"
     poll_interval_min: 15 # как часто опрашивать этот источник
     enabled: true
+    allow_visual: true     # false — не скачивать и не публиковать изображения источника
+    visual_warning: ""     # пояснение модератору, почему визуал использовать нельзя
   - type: telegram
     url: "some_regional_channel"   # username публичного канала (без @)
     region: "Регион"

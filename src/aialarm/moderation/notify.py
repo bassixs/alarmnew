@@ -30,8 +30,9 @@ def _keyboard(post_id: int) -> InlineKeyboardMarkup:
 
 def _card_text(p: dict) -> str:
     flag = "⚠️ ЧУВСТВИТЕЛЬНАЯ ТЕМА\n" if p["is_sensitive"] else ""
+    visual = f"🚫 ВИЗУАЛ БРАТЬ НЕЛЬЗЯ: {p['visual_warning']}\n" if p.get("visual_warning") else ""
     meta = (
-        f"{flag}📊 confidence: {p['confidence']} | тезис: {p['matched_thesis']}\n"
+        f"{flag}{visual}📊 confidence: {p['confidence']} | тезис: {p['matched_thesis']}\n"
         f"🔗 источник: {p['source_url']}\n"
         f"{'─' * 20}\n"
     )
@@ -98,6 +99,8 @@ def _preview_text(p: dict) -> str:
     head = ["❗ ОРИГИНАЛ (не переписан)"]
     if p["is_sensitive"]:
         head.append("⚠️ ЧУВСТВИТЕЛЬНАЯ ТЕМА")
+    if p.get("visual_warning"):
+        head.append(f"🚫 ВИЗУАЛ БРАТЬ НЕЛЬЗЯ: {p['visual_warning']}")
     if p["has_image"]:
         head.append("🖼 есть фото")
     # body уже содержит заголовок первой строкой — title отдельно НЕ добавляем (иначе дубль).
