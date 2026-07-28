@@ -30,7 +30,7 @@ PROCESS_INTERVAL_MIN = 5
 def _processing_job() -> None:
     run_filter_stage()
     route_previews()          # шлём оригиналы на модерацию; рерайт — по кнопке «Переписать»
-    cleanup_old(days=2)       # чистим старые скачанные картинки
+    cleanup_old(days=1)       # чистим старые скачанные картинки
 
 
 def build_scheduler() -> BlockingScheduler:
