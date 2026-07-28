@@ -91,6 +91,23 @@ def _send_max(post_id: int) -> None:
     )
 
 
+def edit_card(post_id: int, message_id: str) -> bool:
+    """Превратить карточку-оригинал в готовый пост без нового сообщения в MAX."""
+    if get_settings().project.moderation.platform != "max":
+        return False
+    from aialarm.moderation import max_client
+
+    p = get_pending(post_id)
+    if not p:
+        return False
+    return max_client.edit_message(
+        message_id,
+        _card_text(p),
+        buttons=max_client.callback_buttons(post_id),
+        image_refs=p.get("image_urls"),
+    )
+
+
 def send_card(post_id: int) -> None:
     """Готовый (переписанный) пост -> карточка ✅/✏️/❌ на площадку из config."""
     if get_settings().project.moderation.platform == "max":

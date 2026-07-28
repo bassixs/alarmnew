@@ -20,7 +20,7 @@ from aialarm.config import get_settings
 from aialarm.control import get_pipeline_state, render_control_status, set_control_mode
 from aialarm.logging import get_logger
 from aialarm.moderation import max_client, service
-from aialarm.moderation.notify import send_card
+from aialarm.moderation.notify import edit_card, send_card
 from aialarm.publishers.service import publish_post_id_sync
 
 log = get_logger(__name__)
@@ -108,10 +108,14 @@ def _handle_callback(update: dict) -> None:
                 return
             max_client.answer_callback(cid, "✍️ Переписываю…")
             post_id = service.rewrite_and_get(obj_id)
-            if mid:
-                max_client.delete_message(mid)  # убираем карточку-оригинал
             if post_id:
-                send_card(post_id)              # шлём готовый пост со схемой ✅/✏️/❌
+                converted = bool(mid and edit_card(post_id, mid))
+                if not converted:
+                    # Запасной путь: сначала успешно отправляем новую карточку,
+                    # только затем убираем оригинал, чтобы ничего не потерять.
+                    send_card(post_id)
+                    if mid:
+                        max_client.delete_message(mid)
         elif action == "cancel":
             service.cancel_preview(obj_id)
             if mid:

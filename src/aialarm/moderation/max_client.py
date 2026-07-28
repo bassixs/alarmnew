@@ -104,20 +104,33 @@ def edit_message(
     message_id: str,
     text: str,
     buttons: list | None = None,
+    image_refs: list[str] | None = None,
 ) -> bool:
-    """Обновить отправленное ботом сообщение без нового уведомления в чате."""
+    """Обновить сообщение и при необходимости заново прикрепить весь фотоальбом."""
     base, token, auth = _conn()
+    headers = {auth: token}
     attachments: list[dict] = []
-    if buttons:
-        attachments.append({"type": "inline_keyboard", "payload": {"buttons": buttons}})
+    refs = list(dict.fromkeys(image_refs or []))[:MAX_IMAGES_PER_POST]
     try:
-        response = httpx.put(
-            f"{base}/messages",
-            params={"message_id": message_id},
-            json={"text": text, "attachments": attachments, "notify": False},
-            headers={auth: token, "Content-Type": "application/json"},
-            timeout=20,
-        )
+        with httpx.Client(timeout=60, follow_redirects=True) as client:
+            for ref in refs:
+                image = _load_image_bytes(client, ref)
+                if not image:
+                    return False
+                payload = _upload_image(client, base, headers, image)
+                if not payload:
+                    return False
+                attachments.append({"type": "image", "payload": payload})
+            if buttons:
+                attachments.append(
+                    {"type": "inline_keyboard", "payload": {"buttons": buttons}}
+                )
+            response = client.put(
+                f"{base}/messages",
+                params={"message_id": message_id},
+                json={"text": text, "attachments": attachments, "notify": False},
+                headers={**headers, "Content-Type": "application/json"},
+            )
         response.raise_for_status()
         data = response.json() if response.content else {}
         return bool(data.get("success", True))
