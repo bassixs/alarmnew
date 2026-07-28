@@ -82,7 +82,12 @@ def _send_max(post_id: int) -> None:
     p = get_pending(post_id)
     if not p:
         return
-    max_client.send_message(chat, _card_text(p), buttons=max_client.callback_buttons(post_id))
+    max_client.send_message(
+        chat,
+        _card_text(p),
+        buttons=max_client.callback_buttons(post_id),
+        image_ref=p.get("image_url"),
+    )
 
 
 def send_card(post_id: int) -> None:
@@ -153,7 +158,12 @@ def _send_preview_max(raw_id: int) -> None:
     p = get_preview(raw_id)
     if not p:
         return
-    max_client.send_message(chat, _preview_text(p), buttons=max_client.preview_buttons(raw_id))
+    max_client.send_message(
+        chat,
+        _preview_text(p),
+        buttons=max_client.preview_buttons(raw_id),
+        image_ref=p.get("image_url"),
+    )
 
 
 def send_preview(raw_id: int) -> None:

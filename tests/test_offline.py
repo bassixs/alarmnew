@@ -57,3 +57,66 @@ def test_source_matches_telegram_post_url():
     assert source_matches("Evgeniy_Serkin", "https://t.me/Evgeniy_Serkin/123")
     assert source_matches("https://t.me/s/Evgeniy_Serkin", "https://t.me/Evgeniy_Serkin/456")
     assert not source_matches("Evgeniy_Serkin", "https://t.me/another_channel/123")
+
+
+def test_max_moderation_message_combines_image_and_buttons():
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+
+    from aialarm.moderation import max_client
+
+    sent: dict = {}
+
+    class FakeResponse:
+        content = b"{}"
+
+        def __init__(self, data: dict):
+            self._data = data
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._data
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def get(self, *args, **kwargs):
+            raise AssertionError("Локальное изображение не должно скачиваться по сети")
+
+        def post(self, url: str, **kwargs):
+            if url.endswith("/uploads"):
+                return FakeResponse({"url": "https://upload.test/image"})
+            if url == "https://upload.test/image":
+                return FakeResponse({"token": "photo-token"})
+            sent["body"] = kwargs["json"]
+            return FakeResponse({"message": {}})
+
+    original_conn = max_client._conn
+    original_client = max_client.httpx.Client
+    try:
+        max_client._conn = lambda: ("https://botapi.test", "token", "Authorization")
+        max_client.httpx.Client = FakeClient
+        with TemporaryDirectory() as tmp:
+            image = Path(tmp) / "image.jpg"
+            image.write_bytes(b"image-bytes")
+            max_client.send_message(
+                "chat",
+                "text",
+                buttons=[[{"type": "callback", "text": "OK", "payload": "ok"}]],
+                image_ref=str(image),
+            )
+    finally:
+        max_client._conn = original_conn
+        max_client.httpx.Client = original_client
+
+    attachment_types = [item["type"] for item in sent["body"]["attachments"]]
+    assert attachment_types == ["image", "inline_keyboard"]

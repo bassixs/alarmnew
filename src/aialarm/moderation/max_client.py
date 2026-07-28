@@ -7,6 +7,8 @@ inline-кнопки — attachments типа inline_keyboard с кнопками
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import httpx
 
 from aialarm.config import get_settings
@@ -21,20 +23,76 @@ def _conn() -> tuple[str, str, str]:
     return base, s.secrets.max_bot_token, s.project.max_platform.auth_header
 
 
-def send_message(chat_id: str, text: str, buttons: list | None = None) -> dict:
+def _load_image_bytes(client: httpx.Client, ref: str) -> bytes | None:
+    try:
+        if not ref.startswith(("http://", "https://")):
+            path = Path(ref)
+            return path.read_bytes() if path.exists() else None
+        response = client.get(ref, headers={"User-Agent": "Mozilla/5.0"})
+        response.raise_for_status()
+        return response.content
+    except Exception as e:  # noqa: BLE001
+        log.warning("max_moderation_image_load_failed", ref=ref[:80], error=str(e))
+        return None
+
+
+def _upload_image(
+    client: httpx.Client,
+    base: str,
+    headers: dict,
+    image: bytes,
+) -> dict | None:
+    try:
+        response = client.post(f"{base}/uploads", params={"type": "image"}, headers=headers)
+        response.raise_for_status()
+        upload_url = response.json().get("url")
+        if not upload_url:
+            return None
+        uploaded = client.post(
+            upload_url,
+            files={"data": ("image.jpg", image, "image/jpeg")},
+        )
+        uploaded.raise_for_status()
+        data = uploaded.json()
+        if data.get("photos"):
+            return {"photos": data["photos"]}
+        if data.get("token"):
+            return {"token": data["token"]}
+        return None
+    except Exception as e:  # noqa: BLE001
+        log.warning("max_moderation_image_upload_failed", error=str(e))
+        return None
+
+
+def send_message(
+    chat_id: str,
+    text: str,
+    buttons: list | None = None,
+    image_ref: str | None = None,
+) -> dict:
     base, token, auth = _conn()
+    headers = {auth: token}
     body: dict = {"text": text}
-    if buttons:
-        body["attachments"] = [{"type": "inline_keyboard", "payload": {"buttons": buttons}}]
-    r = httpx.post(
-        f"{base}/messages",
-        params={"chat_id": str(chat_id)},
-        json=body,
-        headers={auth: token, "Content-Type": "application/json"},
-        timeout=30,
-    )
-    r.raise_for_status()
-    return r.json() if r.content else {}
+    attachments: list[dict] = []
+    with httpx.Client(timeout=60, follow_redirects=True) as client:
+        if image_ref:
+            image = _load_image_bytes(client, image_ref)
+            if image:
+                payload = _upload_image(client, base, headers, image)
+                if payload:
+                    attachments.append({"type": "image", "payload": payload})
+        if buttons:
+            attachments.append({"type": "inline_keyboard", "payload": {"buttons": buttons}})
+        if attachments:
+            body["attachments"] = attachments
+        response = client.post(
+            f"{base}/messages",
+            params={"chat_id": str(chat_id)},
+            json=body,
+            headers={**headers, "Content-Type": "application/json"},
+        )
+    response.raise_for_status()
+    return response.json() if response.content else {}
 
 
 def get_updates(marker: int | None = None, timeout: int = 30) -> dict:

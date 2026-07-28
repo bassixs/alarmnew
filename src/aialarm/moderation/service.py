@@ -136,6 +136,7 @@ def get_preview(raw_id: int) -> dict | None:
             "matched_thesis": fn.matched_thesis if fn else "",
             "is_sensitive": fn.is_sensitive if fn else False,
             "has_image": bool(raw.image_url) and allow_visual,
+            "image_url": raw.image_url if allow_visual else None,
             "visual_warning": visual_warning,
         }
 
@@ -182,7 +183,7 @@ def get_pending(post_id: int) -> dict | None:
         if not rp or not rp.raw:
             return None
         fn = session.scalar(select(FilteredNews).where(FilteredNews.raw_id == rp.raw_id))
-        _, visual_warning = visual_policy(rp.raw.source_url)
+        allow_visual, visual_warning = visual_policy(rp.raw.source_url)
         return {
             "post_id": rp.id,
             "post_text": rp.post_text,
@@ -191,5 +192,6 @@ def get_pending(post_id: int) -> dict | None:
             "confidence": fn.confidence if fn else 0,
             "matched_thesis": fn.matched_thesis if fn else "",
             "is_sensitive": fn.is_sensitive if fn else False,
+            "image_url": rp.raw.image_url if allow_visual else None,
             "visual_warning": visual_warning,
         }
