@@ -32,7 +32,8 @@ def _card_text(p: dict) -> str:
     flag = "⚠️ ЧУВСТВИТЕЛЬНАЯ ТЕМА\n" if p["is_sensitive"] else ""
     visual = f"🚫 ВИЗУАЛ БРАТЬ НЕЛЬЗЯ: {p['visual_warning']}\n" if p.get("visual_warning") else ""
     meta = (
-        f"{flag}{visual}📊 confidence: {p['confidence']} | тезис: {p['matched_thesis']}\n"
+        f"{flag}{visual}📊 Насколько новость подходит каналу: {p['confidence']} из 100\n"
+        f"📌 Тезис: {p['matched_thesis']}\n"
         f"🔗 источник: {p['source_url']}\n"
         f"{'─' * 20}\n"
     )
