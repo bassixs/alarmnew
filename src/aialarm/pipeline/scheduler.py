@@ -27,6 +27,7 @@ log = get_logger(__name__)
 
 PROCESS_INTERVAL_MIN = 5
 _last_active: bool | None = None
+_last_scheduled_active: bool | None = None
 
 
 def _collection_job() -> None:
@@ -77,19 +78,40 @@ def _notify_control_transition(active: bool) -> None:
         log.warning("control_transition_notify_failed", error=str(e))
 
 
+def _is_schedule_transition(
+    previous_active: bool,
+    previous_scheduled_active: bool,
+    active: bool,
+    scheduled_active: bool,
+) -> bool:
+    """Отличить границу расписания от ручного переключения ON/OFF/AUTO."""
+    return previous_active != active and previous_scheduled_active != scheduled_active
+
+
 def _control_tick() -> None:
-    global _last_active
+    global _last_active, _last_scheduled_active
     state = get_pipeline_state()
-    if _last_active is None:
+    if _last_active is None or _last_scheduled_active is None:
         _last_active = state.active
+        _last_scheduled_active = state.scheduled_active
         log.info("duty_state_initialized", active=state.active, mode=state.mode)
         return
-    if state.active != _last_active:
-        _last_active = state.active
+
+    active_changed = state.active != _last_active
+    schedule_changed = _is_schedule_transition(
+        _last_active,
+        _last_scheduled_active,
+        state.active,
+        state.scheduled_active,
+    )
+    _last_active = state.active
+    _last_scheduled_active = state.scheduled_active
+    if active_changed:
         log.info("duty_state_changed", active=state.active, mode=state.mode)
-        _notify_control_transition(state.active)
+        if schedule_changed:
+            _notify_control_transition(state.active)
         if state.active:
-            # Не ждём до 20 минут после начала смены: сразу собираем свежие публикации.
+            # Не ждём до 20 минут после включения: сразу собираем свежие публикации.
             _collection_job()
 
 

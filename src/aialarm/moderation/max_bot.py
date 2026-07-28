@@ -34,29 +34,57 @@ def _control_allowed(user_id: int | None) -> bool:
     return not allowed or (user_id is not None and user_id in allowed)
 
 
-def _send_control_panel() -> None:
+def _control_notice(action: str, active: bool) -> str:
+    if action == "auto":
+        detail = (
+            "Сейчас помощник работает по расписанию."
+            if active
+            else "Сейчас помощник вне смены и включится автоматически по расписанию."
+        )
+        return f"🕒 Режим AUTO включён\n\n{detail}"
+    if action == "on":
+        return "▶️ Помощник включён вручную"
+    if action == "off":
+        return "⏸ Помощник выключен вручную"
+    return ""
+
+
+def _send_control_panel(message_id: str = "", notice: str = "") -> None:
+    text = render_control_status()
+    if notice:
+        text = f"{notice}\n\n{text}"
+    buttons = max_client.control_buttons()
+    if message_id and max_client.edit_message(message_id, text, buttons=buttons):
+        return
     chat = get_settings().project.moderation.max_chat_id
     if chat:
-        max_client.send_message(
-            chat,
-            render_control_status(),
-            buttons=max_client.control_buttons(),
-        )
+        max_client.send_message(chat, text, buttons=buttons)
 
 
-def _handle_control(action: str, user_id: int | None, callback_id: str = "") -> None:
+def _handle_control(
+    action: str,
+    user_id: int | None,
+    callback_id: str = "",
+    message_id: str = "",
+) -> None:
     if not _control_allowed(user_id):
         if callback_id:
             max_client.answer_callback(callback_id, "Нет доступа к управлению")
         return
+    notice = ""
     if action in {"on", "off", "auto"}:
         state = set_control_mode(action)
+        notice = _control_notice(action, state.active)
         if callback_id:
-            label = "включён" if state.active else "выключен"
-            max_client.answer_callback(callback_id, f"Помощник {label}")
+            callback_text = (
+                "Режим AUTO включён"
+                if action == "auto"
+                else f"Помощник {'включён' if state.active else 'выключен'}"
+            )
+            max_client.answer_callback(callback_id, callback_text)
     elif action == "status" and callback_id:
         max_client.answer_callback(callback_id, "Статус обновлён")
-    _send_control_panel()
+    _send_control_panel(message_id=message_id, notice=notice)
 
 
 def _handle_callback(update: dict) -> None:
@@ -69,7 +97,7 @@ def _handle_callback(update: dict) -> None:
     obj_id = int(id_s) if id_s.isdigit() else None
 
     if prefix == "ctl":
-        _handle_control(action, user_id, cid)
+        _handle_control(action, user_id, cid, mid or "")
         return
 
     # ── Шаг 1: карточка-оригинал ──────────────────────────────────────────

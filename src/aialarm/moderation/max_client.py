@@ -100,6 +100,32 @@ def send_message(
     return response.json() if response.content else {}
 
 
+def edit_message(
+    message_id: str,
+    text: str,
+    buttons: list | None = None,
+) -> bool:
+    """Обновить отправленное ботом сообщение без нового уведомления в чате."""
+    base, token, auth = _conn()
+    attachments: list[dict] = []
+    if buttons:
+        attachments.append({"type": "inline_keyboard", "payload": {"buttons": buttons}})
+    try:
+        response = httpx.put(
+            f"{base}/messages",
+            params={"message_id": message_id},
+            json={"text": text, "attachments": attachments, "notify": False},
+            headers={auth: token, "Content-Type": "application/json"},
+            timeout=20,
+        )
+        response.raise_for_status()
+        data = response.json() if response.content else {}
+        return bool(data.get("success", True))
+    except Exception as e:  # noqa: BLE001
+        log.warning("max_edit_failed", message_id=message_id, error=str(e))
+        return False
+
+
 def get_updates(marker: int | None = None, timeout: int = 30) -> dict:
     base, token, auth = _conn()
     params: dict = {"timeout": timeout, "limit": 100}
