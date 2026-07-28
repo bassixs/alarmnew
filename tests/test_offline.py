@@ -106,17 +106,41 @@ def test_max_moderation_message_combines_image_and_buttons():
         max_client._conn = lambda: ("https://botapi.test", "token", "Authorization")
         max_client.httpx.Client = FakeClient
         with TemporaryDirectory() as tmp:
-            image = Path(tmp) / "image.jpg"
-            image.write_bytes(b"image-bytes")
+            images = []
+            for index in range(9):
+                image = Path(tmp) / f"image-{index}.jpg"
+                image.write_bytes(f"image-{index}".encode())
+                images.append(str(image))
             max_client.send_message(
                 "chat",
                 "text",
                 buttons=[[{"type": "callback", "text": "OK", "payload": "ok"}]],
-                image_ref=str(image),
+                image_refs=images,
             )
     finally:
         max_client._conn = original_conn
         max_client.httpx.Client = original_client
 
     attachment_types = [item["type"] for item in sent["body"]["attachments"]]
-    assert attachment_types == ["image", "inline_keyboard"]
+    assert attachment_types == ["image"] * 9 + ["inline_keyboard"]
+
+
+def test_tg_web_extracts_up_to_ten_album_images():
+    from bs4 import BeautifulSoup
+
+    from aialarm.collectors.tg_web import TgWebCollector
+
+    photos = "".join(
+        f'<a class="tgme_widget_message_photo_wrap" '
+        f'style="background-image:url(https://cdn.test/{index}.jpg)"></a>'
+        for index in range(12)
+    )
+    message = BeautifulSoup(f'<div class="tgme_widget_message">{photos}</div>', "html.parser")
+    urls = TgWebCollector._extract_images(message)
+    assert len(urls) == 10
+    assert urls[0].endswith("/0.jpg") and urls[-1].endswith("/9.jpg")
+
+
+def test_post_image_refs_are_unique():
+    post = Post(text="text", image_url="one.jpg", image_urls=["one.jpg", "two.jpg"])
+    assert post.image_refs() == ["one.jpg", "two.jpg"]

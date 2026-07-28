@@ -22,6 +22,7 @@ from aialarm.logging import get_logger
 log = get_logger(__name__)
 _UA = "Mozilla/5.0 (compatible; aialarm/0.1)"
 _BG_RE = re.compile(r"url\(['\"]?(.*?)['\"]?\)")
+_MAX_IMAGES_PER_POST = 10
 
 
 class TgWebCollector:
@@ -47,6 +48,7 @@ class TgWebCollector:
             if not text:
                 continue  # чисто медиа/сервисные сообщения пропускаем
             post_url = self._post_url(msg)
+            image_urls = self._extract_images(msg)
             items.append(
                 CollectedItem(
                     source_type="tg_web",
@@ -54,7 +56,8 @@ class TgWebCollector:
                     region=self.cfg.region,
                     title=text.split("\n", 1)[0][:200],
                     body=text,
-                    image_url=self._extract_image(msg),
+                    image_url=image_urls[0] if image_urls else None,
+                    image_urls=image_urls,
                     published_at=self._extract_dt(msg),
                     item_url=post_url,
                 )
@@ -92,12 +95,14 @@ class TgWebCollector:
         return None
 
     @staticmethod
-    def _extract_image(msg) -> str | None:
-        wrap = msg.select_one("a.tgme_widget_message_photo_wrap") or msg.select_one(
-            "i.tgme_widget_message_photo"
+    def _extract_images(msg) -> list[str]:
+        nodes = msg.select(
+            "a.tgme_widget_message_photo_wrap, i.tgme_widget_message_photo"
         )
-        if wrap and wrap.get("style"):
-            m = _BG_RE.search(wrap["style"])
-            if m:
-                return m.group(1)
-        return None
+        urls: list[str] = []
+        for node in nodes:
+            style = node.get("style", "")
+            match = _BG_RE.search(style)
+            if match and match.group(1) not in urls:
+                urls.append(match.group(1))
+        return urls[:_MAX_IMAGES_PER_POST]

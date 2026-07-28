@@ -67,12 +67,16 @@ def cleanup_old(days: int = 2) -> int:
             NewsStatus.APPROVED,
         )
         with session_scope() as session:
-            refs = session.scalars(
-                select(RawNews.image_url)
-                .where(RawNews.image_url.is_not(None))
+            rows = session.execute(
+                select(RawNews.image_url, RawNews.image_urls)
                 .where(RawNews.status.in_(protected_statuses))
             ).all()
-        protected = {str(Path(ref)).replace("\\", "/") for ref in refs if ref}
+        refs: list[str] = []
+        for primary, album in rows:
+            refs.extend(ref for ref in list(album or []) if ref)
+            if primary:
+                refs.append(primary)
+        protected = {str(Path(ref)).replace("\\", "/") for ref in refs}
     except Exception as e:  # noqa: BLE001
         # При проблеме с БД безопаснее пропустить очистку, чем удалить активное фото.
         log.warning("image_cleanup_skipped", error=str(e))

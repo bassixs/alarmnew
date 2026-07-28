@@ -17,6 +17,7 @@ class CollectedItem:
     title: str
     body: str = ""
     image_url: str | None = None
+    image_urls: list[str] = field(default_factory=list)
     published_at: datetime | None = None
     # Ссылка на конкретную новость (для дедуп-ключа), если отличается от source_url фида.
     item_url: str = ""

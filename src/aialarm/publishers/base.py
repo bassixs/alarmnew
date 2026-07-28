@@ -13,7 +13,12 @@ from typing import Protocol
 class Post:
     text: str
     image_url: str | None = None
+    image_urls: list[str] = field(default_factory=list)
     hashtags: list[str] = field(default_factory=list)
+
+    def image_refs(self) -> list[str]:
+        refs = list(self.image_urls or []) + ([self.image_url] if self.image_url else [])
+        return list(dict.fromkeys(refs))
 
     def rendered_text(self, max_len: int) -> str:
         body = self.text

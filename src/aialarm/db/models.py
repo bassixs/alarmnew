@@ -82,6 +82,7 @@ class RawNews(Base):
     title: Mapped[str] = mapped_column(Text)
     body: Mapped[str] = mapped_column(Text, default="")
     image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    image_urls: Mapped[list[str] | None] = mapped_column(JSON, nullable=True, default=list)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

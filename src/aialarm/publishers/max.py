@@ -14,6 +14,7 @@ import httpx
 
 from aialarm.config import get_settings
 from aialarm.logging import get_logger
+from aialarm.media import MAX_IMAGES_PER_POST
 from aialarm.publishers.base import Post, PublishResult
 from aialarm.publishers.footer import render_footer
 
@@ -83,12 +84,16 @@ class MaxPublisher:
         body: dict = {"text": self._text(post), "format": "markdown"}
         try:
             async with httpx.AsyncClient(timeout=60) as client:
-                if post.image_url:
-                    img = await _load_bytes(post.image_url)
-                    if img:
-                        payload = await self._upload_image(client, img)
-                        if payload:
-                            body["attachments"] = [{"type": "image", "payload": payload}]
+                attachments: list[dict] = []
+                for ref in post.image_refs()[:MAX_IMAGES_PER_POST]:
+                    image = await _load_bytes(ref)
+                    if not image:
+                        continue
+                    payload = await self._upload_image(client, image)
+                    if payload:
+                        attachments.append({"type": "image", "payload": payload})
+                if attachments:
+                    body["attachments"] = attachments
 
                 resp = await client.post(
                     f"{self._base}/messages",

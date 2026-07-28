@@ -86,7 +86,7 @@ def _send_max(post_id: int) -> None:
         chat,
         _card_text(p),
         buttons=max_client.callback_buttons(post_id),
-        image_ref=p.get("image_url"),
+        image_refs=p.get("image_urls"),
     )
 
 
@@ -162,7 +162,7 @@ def _send_preview_max(raw_id: int) -> None:
         chat,
         _preview_text(p),
         buttons=max_client.preview_buttons(raw_id),
-        image_ref=p.get("image_url"),
+        image_refs=p.get("image_urls"),
     )
 
 

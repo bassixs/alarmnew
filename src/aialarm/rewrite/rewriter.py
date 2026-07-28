@@ -15,7 +15,7 @@ from aialarm.db import session_scope
 from aialarm.db.models import NewsStatus, RawNews, RewrittenPost
 from aialarm.llm.client import get_llm_client
 from aialarm.logging import get_logger
-from aialarm.source_policy import visual_allowed
+from aialarm.media import raw_image_refs
 
 log = get_logger(__name__)
 
@@ -96,7 +96,7 @@ def rewrite_one(session: Session, raw: RawNews) -> RewrittenPost:
     # Строка источника (только если есть фото). Подвал площадки добавляется при публикации.
     attribution = _attribution(
         raw.source_url,
-        has_image=bool(raw.image_url) and visual_allowed(raw.source_url),
+        has_image=bool(raw_image_refs(raw)),
     )
     if attribution:
         post_text = f"{post_text}\n\n{attribution}"

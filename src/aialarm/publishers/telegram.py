@@ -14,7 +14,7 @@ import httpx
 from aiogram import Bot
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramRetryAfter, TelegramAPIError
-from aiogram.types import BufferedInputFile
+from aiogram.types import BufferedInputFile, InputMediaPhoto
 
 from aialarm.config import get_settings
 from aialarm.logging import get_logger
@@ -62,20 +62,49 @@ class TelegramPublisher:
 
         bot = Bot(self._token)
         try:
-            img = await _image_bytes(post.image_url) if post.image_url else None
-            # С фото caption ограничен 1024. Если пост длиннее — публикуем текстом (без потери).
-            caption = _html_body(post, _CAPTION_LIMIT - 200)
-            if img and len(caption) <= _CAPTION_LIMIT:
-                photo = BufferedInputFile(img, filename="image.jpg")
+            images: list[bytes] = []
+            for ref in post.image_refs()[:10]:
+                image = await _image_bytes(ref)
+                if image:
+                    images.append(image)
+
+            text = _html_body(post, _TEXT_LIMIT - 300)
+            caption = text if len(text) <= _CAPTION_LIMIT else None
+            if len(images) == 1:
                 msg = await bot.send_photo(
-                    self._chat_id, photo=photo, caption=caption, parse_mode=ParseMode.HTML
+                    self._chat_id,
+                    photo=BufferedInputFile(images[0], filename="image-01.jpg"),
+                    caption=caption,
+                    parse_mode=ParseMode.HTML if caption else None,
                 )
+            elif len(images) > 1:
+                media = [
+                    InputMediaPhoto(
+                        media=BufferedInputFile(image, filename=f"image-{index + 1:02d}.jpg"),
+                        caption=caption if index == 0 else None,
+                        parse_mode=ParseMode.HTML if index == 0 and caption else None,
+                    )
+                    for index, image in enumerate(images)
+                ]
+                messages = await bot.send_media_group(self._chat_id, media=media)
+                msg = messages[0]
             else:
-                if img:
-                    log.info("tg_photo_dropped_caption_too_long")
-                text = _html_body(post, _TEXT_LIMIT - 300)
-                msg = await bot.send_message(self._chat_id, text, parse_mode=ParseMode.HTML,
-                                             disable_web_page_preview=True)
+                msg = await bot.send_message(
+                    self._chat_id,
+                    text,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True,
+                )
+
+            # Caption альбома ограничен 1024 символами. Длинный текст отправляем следом,
+            # не обрезая его и не выбрасывая фотографии.
+            if images and caption is None:
+                msg = await bot.send_message(
+                    self._chat_id,
+                    text,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True,
+                )
             return PublishResult(ok=True, external_id=str(msg.message_id))
         except TelegramRetryAfter as e:
             log.warning("tg_rate_limited", retry_after=e.retry_after)

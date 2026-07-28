@@ -4,7 +4,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Iterator
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect
 from sqlalchemy.orm import Session, sessionmaker
 
 from aialarm.config import get_settings
@@ -38,6 +38,13 @@ def init_db() -> None:
     """Создать таблицы (пилот). В проде — Alembic-миграции."""
     _get_factory()
     Base.metadata.create_all(_engine)
+    # create_all не добавляет колонки в существующую SQLite. Добавляем список фото
+    # небольшой встроенной миграцией; старое image_url остаётся для совместимости.
+    if _engine.dialect.name == "sqlite":
+        columns = {column["name"] for column in inspect(_engine).get_columns("raw_news")}
+        if "image_urls" not in columns:
+            with _engine.begin() as connection:
+                connection.exec_driver_sql("ALTER TABLE raw_news ADD COLUMN image_urls JSON")
 
 
 def get_session() -> Session:

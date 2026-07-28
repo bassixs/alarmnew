@@ -13,6 +13,7 @@ import httpx
 
 from aialarm.config import get_settings
 from aialarm.logging import get_logger
+from aialarm.media import MAX_IMAGES_PER_POST
 
 log = get_logger(__name__)
 
@@ -69,18 +70,22 @@ def send_message(
     text: str,
     buttons: list | None = None,
     image_ref: str | None = None,
+    image_refs: list[str] | None = None,
 ) -> dict:
     base, token, auth = _conn()
     headers = {auth: token}
     body: dict = {"text": text}
     attachments: list[dict] = []
     with httpx.Client(timeout=60, follow_redirects=True) as client:
-        if image_ref:
-            image = _load_image_bytes(client, image_ref)
-            if image:
-                payload = _upload_image(client, base, headers, image)
-                if payload:
-                    attachments.append({"type": "image", "payload": payload})
+        refs = list(image_refs or []) + ([image_ref] if image_ref else [])
+        unique_refs = list(dict.fromkeys(refs))[:MAX_IMAGES_PER_POST]
+        for ref in unique_refs:
+            image = _load_image_bytes(client, ref)
+            if not image:
+                continue
+            payload = _upload_image(client, base, headers, image)
+            if payload:
+                attachments.append({"type": "image", "payload": payload})
         if buttons:
             attachments.append({"type": "inline_keyboard", "payload": {"buttons": buttons}})
         if attachments:
