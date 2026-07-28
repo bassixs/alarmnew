@@ -17,6 +17,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
 from aialarm.config import get_settings
+from aialarm.control import get_pipeline_state
 from aialarm.logging import get_logger
 from aialarm.moderation import service
 from aialarm.publishers.service import publish_post_id_sync
@@ -43,6 +44,9 @@ def build_dispatcher() -> Dispatcher:
         _, action, raw_id_s = cq.data.split(":")
         raw_id = int(raw_id_s)
         if action == "rewrite":
+            if not get_pipeline_state().active:
+                await cq.answer("Помощник сейчас вне смены", show_alert=True)
+                return
             await cq.answer("Переписываю…")
             post_id = await asyncio.to_thread(service.rewrite_and_get, raw_id)
             try:
@@ -67,6 +71,9 @@ def build_dispatcher() -> Dispatcher:
         post_id = int(post_id_s)
 
         if action == "approve":
+            if not get_pipeline_state().active:
+                await cq.answer("Помощник сейчас вне смены", show_alert=True)
+                return
             if service.approve(post_id):
                 ok = await asyncio.to_thread(publish_post_id_sync, post_id)
                 await cq.message.answer(
@@ -78,6 +85,9 @@ def build_dispatcher() -> Dispatcher:
             service.reject(post_id)
             await cq.message.answer("❌ Отклонено")
         elif action == "edit":
+            if not get_pipeline_state().active:
+                await cq.answer("Помощник сейчас вне смены", show_alert=True)
+                return
             await state.set_state(EditState.waiting_text)
             await state.update_data(post_id=post_id)
             await cq.message.answer("✏️ Пришлите исправленный текст поста одним сообщением.")

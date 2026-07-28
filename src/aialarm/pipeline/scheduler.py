@@ -16,6 +16,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from aialarm.config import get_settings
 from aialarm.db import init_db
 from aialarm.collectors.images import cleanup_old
+from aialarm.control import get_pipeline_state, render_control_status
 from aialarm.filtering import run_filter_stage
 from aialarm.logging import configure_logging, get_logger
 from aialarm.moderation.service import route_previews
@@ -25,12 +26,69 @@ from aialarm.publishers.service import run_publish_stage
 log = get_logger(__name__)
 
 PROCESS_INTERVAL_MIN = 5
+_last_active: bool | None = None
+
+
+def _collection_job() -> None:
+    state = get_pipeline_state()
+    if not state.active:
+        log.info("collection_skipped_outside_duty", mode=state.mode)
+        return
+    run_collection_sync(published_since=state.active_since)
 
 
 def _processing_job() -> None:
-    run_filter_stage()
-    route_previews()          # шлём оригиналы на модерацию; рерайт — по кнопке «Переписать»
+    state = get_pipeline_state()
+    if not state.active:
+        log.info("processing_skipped_outside_duty", mode=state.mode)
+        return
+    run_filter_stage(collected_since=state.active_since)
+    route_previews(collected_since=state.active_since)
     cleanup_old(days=1)       # чистим старые скачанные картинки
+
+
+def _publish_job() -> None:
+    state = get_pipeline_state()
+    if not state.active:
+        log.info("publish_skipped_outside_duty", mode=state.mode)
+        return
+    run_publish_stage()
+
+
+def _notify_control_transition(active: bool) -> None:
+    try:
+        from aialarm.moderation import max_client
+
+        chat_id = get_settings().project.moderation.max_chat_id
+        if chat_id:
+            prefix = (
+                "🟢 Смена помощника началась\n\n"
+                if active
+                else "⚪ Смена помощника завершена\n\n"
+            )
+            max_client.send_message(
+                chat_id,
+                prefix + render_control_status(),
+                buttons=max_client.control_buttons(),
+            )
+    except Exception as e:  # noqa: BLE001
+        log.warning("control_transition_notify_failed", error=str(e))
+
+
+def _control_tick() -> None:
+    global _last_active
+    state = get_pipeline_state()
+    if _last_active is None:
+        _last_active = state.active
+        log.info("duty_state_initialized", active=state.active, mode=state.mode)
+        return
+    if state.active != _last_active:
+        _last_active = state.active
+        log.info("duty_state_changed", active=state.active, mode=state.mode)
+        _notify_control_transition(state.active)
+        if state.active:
+            # Не ждём до 20 минут после начала смены: сразу собираем свежие публикации.
+            _collection_job()
 
 
 def build_scheduler() -> BlockingScheduler:
@@ -43,7 +101,7 @@ def build_scheduler() -> BlockingScheduler:
     intervals = [s.poll_interval_min for s in proj.sources if s.enabled]
     collect_interval = min(intervals) if intervals else 20
     # next_run_time -> первый запуск вскоре после старта (не ждём полный интервал).
-    sched.add_job(run_collection_sync, "interval", minutes=max(1, collect_interval),
+    sched.add_job(_collection_job, "interval", minutes=max(1, collect_interval),
                   id="collect", max_instances=1, coalesce=True,
                   next_run_time=now + timedelta(seconds=5))
 
@@ -51,12 +109,21 @@ def build_scheduler() -> BlockingScheduler:
                   max_instances=1, coalesce=True,
                   next_run_time=now + timedelta(seconds=45))
     sched.add_job(
-        run_publish_stage,
+        _publish_job,
         "interval",
         minutes=max(1, proj.publish.min_minutes_between_posts),
         id="publish",
         max_instances=1,
         coalesce=True,
+    )
+    sched.add_job(
+        _control_tick,
+        "interval",
+        minutes=1,
+        id="duty_control",
+        max_instances=1,
+        coalesce=True,
+        next_run_time=now,
     )
     return sched
 

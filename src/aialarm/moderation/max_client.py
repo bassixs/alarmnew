@@ -97,3 +97,17 @@ def preview_buttons(raw_id: int) -> list:
             {"type": "callback", "text": "🗑 Отменить", "payload": f"pre:cancel:{raw_id}"},
         ]
     ]
+
+
+def control_buttons() -> list:
+    """Панель сменного режима помощника."""
+    return [
+        [
+            {"type": "callback", "text": "▶️ Включить", "payload": "ctl:on"},
+            {"type": "callback", "text": "⏸ Выключить", "payload": "ctl:off"},
+        ],
+        [
+            {"type": "callback", "text": "🕒 AUTO", "payload": "ctl:auto"},
+            {"type": "callback", "text": "📊 Статус", "payload": "ctl:status"},
+        ],
+    ]

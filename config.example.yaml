@@ -65,9 +65,22 @@ filter:
 moderation:
   enabled: true
   mode: "all"                      # all | sensitive_only | off
+  platform: "max"                  # где проходит модерация: telegram | max
   admin_chat_id: 0                 # chat_id администратора/закрытого чата (int)
+  max_chat_id: ""                  # MAX-чат модерации
+  control_user_ids: []             # необязательно: MAX user_id тех, кто может ON/OFF/AUTO
   auto_publish_after_min: 0        # 0 = не автопубликовать по таймауту; >0 — только для низкорисковых
   auto_publish_low_risk_on_timeout: false
+
+# ── Сменный режим помощника ────────────────────────────────────────────────
+# MAX-бот управления работает постоянно, а конвейер включается только в эти окна.
+duty_schedule:
+  enabled: true
+  timezone: "Europe/Moscow"
+  weekday_start: "17:00"
+  weekday_end: "23:00"
+  weekend_start: "09:00"
+  weekend_end: "23:00"
 
 # ── Публикация ───────────────────────────────────────────────────────────────
 publish:

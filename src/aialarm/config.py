@@ -67,8 +67,20 @@ class ModerationCfg(BaseModel):
     platform: str = "telegram"   # где модерируем: telegram | max
     admin_chat_id: int = 0       # Telegram-чат модерации
     max_chat_id: str = ""        # MAX-чат модерации (если platform == max)
+    control_user_ids: list[int] = Field(default_factory=list)
     auto_publish_after_min: int = 0
     auto_publish_low_risk_on_timeout: bool = False
+
+
+class DutyScheduleCfg(BaseModel):
+    """Рабочие окна помощника редакции в локальном часовом поясе."""
+
+    enabled: bool = True
+    timezone: str = "Europe/Moscow"
+    weekday_start: str = "17:00"
+    weekday_end: str = "23:00"
+    weekend_start: str = "09:00"
+    weekend_end: str = "23:00"
 
 
 class FooterItem(BaseModel):
@@ -113,6 +125,7 @@ class ProjectConfig(BaseModel):
     posting_frequency: str = "3-5 постов в день"
     filter: FilterCfg = Field(default_factory=FilterCfg)
     moderation: ModerationCfg = Field(default_factory=ModerationCfg)
+    duty_schedule: DutyScheduleCfg = Field(default_factory=DutyScheduleCfg)
     publish: PublishCfg = Field(default_factory=PublishCfg)
     llm: LLMCfg = Field(default_factory=LLMCfg)
     max_platform: MaxPlatformCfg = Field(default_factory=MaxPlatformCfg)

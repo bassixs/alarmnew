@@ -6,6 +6,8 @@
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -83,13 +85,17 @@ def filter_one(session: Session, raw: RawNews) -> FilteredNews:
     return filtered
 
 
-def run_filter_stage(limit: int = 50) -> dict[str, int]:
+def run_filter_stage(
+    limit: int = 50,
+    collected_since: datetime | None = None,
+) -> dict[str, int]:
     """Обработать все новости в статусе NEW."""
     stats = {"processed": 0, "relevant": 0, "filtered_out": 0, "excluded": 0}
     with session_scope() as session:
-        rows = session.scalars(
-            select(RawNews).where(RawNews.status == NewsStatus.NEW).limit(limit)
-        ).all()
+        stmt = select(RawNews).where(RawNews.status == NewsStatus.NEW)
+        if collected_since is not None:
+            stmt = stmt.where(RawNews.collected_at >= collected_since)
+        rows = session.scalars(stmt.limit(limit)).all()
         for raw in rows:
             filter_one(session, raw)
             stats["processed"] += 1

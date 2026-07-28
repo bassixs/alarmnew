@@ -43,7 +43,10 @@ def _is_sensitive(session: Session, raw_id: int) -> bool:
     return bool(fn and fn.is_sensitive)
 
 
-def route_previews(limit: int = 50) -> dict[str, int]:
+def route_previews(
+    limit: int = 50,
+    collected_since: datetime | None = None,
+) -> dict[str, int]:
     """RELEVANT -> PREVIEW: шлём модератору ОРИГИНАЛ (без рерайта) с кнопками
     «Переписать»/«Отменить». Рерайт (Sonnet) откладывается до нажатия «Переписать» —
     не тратим деньги на посты, которые не возьмут."""
@@ -52,9 +55,10 @@ def route_previews(limit: int = 50) -> dict[str, int]:
     stats = {"to_preview": 0, "auto_approved": 0}
     to_notify: list[int] = []
     with session_scope() as session:
-        rows = session.scalars(
-            select(RawNews).where(RawNews.status == NewsStatus.RELEVANT).limit(limit)
-        ).all()
+        stmt = select(RawNews).where(RawNews.status == NewsStatus.RELEVANT)
+        if collected_since is not None:
+            stmt = stmt.where(RawNews.collected_at >= collected_since)
+        rows = session.scalars(stmt.limit(limit)).all()
         for raw in rows:
             if _needs_moderation(session, raw):
                 raw.status = NewsStatus.PREVIEW

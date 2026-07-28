@@ -45,14 +45,45 @@ def download_and_store(url: str, key: str) -> str | None:
 
 
 def cleanup_old(days: int = 2) -> int:
-    """Удалить картинки старше N дней. Возвращает число удалённых."""
+    """Удалить неиспользуемые картинки старше N дней.
+
+    Файлы активной очереди сохраняем независимо от возраста: дежурный может вернуться
+    к карточке позже, и публикация не должна внезапно потерять изображение.
+    """
     if not IMAGES_DIR.exists():
         return 0
+    try:
+        from sqlalchemy import select
+
+        from aialarm.db import session_scope
+        from aialarm.db.models import NewsStatus, RawNews
+
+        protected_statuses = (
+            NewsStatus.NEW,
+            NewsStatus.RELEVANT,
+            NewsStatus.PREVIEW,
+            NewsStatus.REWRITTEN,
+            NewsStatus.MODERATION,
+            NewsStatus.APPROVED,
+        )
+        with session_scope() as session:
+            refs = session.scalars(
+                select(RawNews.image_url)
+                .where(RawNews.image_url.is_not(None))
+                .where(RawNews.status.in_(protected_statuses))
+            ).all()
+        protected = {str(Path(ref)).replace("\\", "/") for ref in refs if ref}
+    except Exception as e:  # noqa: BLE001
+        # При проблеме с БД безопаснее пропустить очистку, чем удалить активное фото.
+        log.warning("image_cleanup_skipped", error=str(e))
+        return 0
+
     cutoff = time.time() - days * 86400
     removed = 0
     for f in IMAGES_DIR.glob("*.jpg"):
         try:
-            if f.stat().st_mtime < cutoff:
+            normalized = str(f).replace("\\", "/")
+            if normalized not in protected and f.stat().st_mtime < cutoff:
                 f.unlink()
                 removed += 1
         except OSError:

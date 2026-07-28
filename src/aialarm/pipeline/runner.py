@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 
 from aialarm.collectors import build_collector, store_items
 from aialarm.config import SourceCfg, get_settings
@@ -26,7 +27,18 @@ async def _fetch_source(cfg: SourceCfg):
         return []
 
 
-async def run_collection(only_source_url: str | None = None) -> dict[str, int]:
+def _in_collection_window(published_at: datetime | None, since: datetime | None) -> bool:
+    if since is None or published_at is None:
+        return True
+    if published_at.tzinfo is None:
+        published_at = published_at.replace(tzinfo=timezone.utc)
+    return published_at.astimezone(timezone.utc) >= since.astimezone(timezone.utc)
+
+
+async def run_collection(
+    only_source_url: str | None = None,
+    published_since: datetime | None = None,
+) -> dict[str, int]:
     """Собрать со всех включённых источников. Скачиваем каналы параллельно, но пишем в БД
     ПОСЛЕДОВАТЕЛЬНО — иначе параллельные записи в SQLite дают 'database is locked'."""
     sources = get_settings().project.sources
@@ -36,18 +48,33 @@ async def run_collection(only_source_url: str | None = None) -> dict[str, int]:
     ]
     fetched = await asyncio.gather(*[_fetch_source(s) for s in active])
     inserted = 0
+    outside_window = 0
     for items in fetched:
+        if published_since is not None:
+            accepted = [
+                item for item in items
+                if _in_collection_window(item.published_at, published_since)
+            ]
+            outside_window += len(items) - len(accepted)
+            items = accepted
         try:
             inserted += store_items(items)["inserted"]
         except Exception as e:  # noqa: BLE001
             log.error("store_items_failed", error=str(e))
-    total = {"sources": len(active), "inserted": inserted}
+    total = {
+        "sources": len(active),
+        "inserted": inserted,
+        "outside_window": outside_window,
+    }
     log.info("collection_done", **total)
     return total
 
 
-def run_collection_sync(only_source_url: str | None = None) -> dict[str, int]:
-    return asyncio.run(run_collection(only_source_url))
+def run_collection_sync(
+    only_source_url: str | None = None,
+    published_since: datetime | None = None,
+) -> dict[str, int]:
+    return asyncio.run(run_collection(only_source_url, published_since))
 
 
 def run_processing() -> dict[str, dict]:

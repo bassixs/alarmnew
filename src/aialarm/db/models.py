@@ -54,6 +54,22 @@ class PublishStatus(str, enum.Enum):
     RATE_LIMITED = "rate_limited"
 
 
+class PipelineControl(Base):
+    """Сохранённый ручной режим помощника: AUTO, ON или OFF до ближайшей границы смены."""
+
+    __tablename__ = "pipeline_control"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    mode: Mapped[str] = mapped_column(String(16), default="auto")
+    override_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    override_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
 class RawNews(Base):
     __tablename__ = "raw_news"
     __table_args__ = (UniqueConstraint("dedup_key", name="uq_raw_news_dedup_key"),)
