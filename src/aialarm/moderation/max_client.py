@@ -131,11 +131,18 @@ def edit_message(
                 json={"text": text, "attachments": attachments, "notify": False},
                 headers={**headers, "Content-Type": "application/json"},
             )
-        response.raise_for_status()
+        if response.status_code >= 400:
+            log.warning("max_edit_http_error", message_id=str(message_id)[:24],
+                        status=response.status_code, body=response.text[:300])
+            return False
         data = response.json() if response.content else {}
-        return bool(data.get("success", True))
+        ok = bool(data.get("success", True))
+        if not ok:
+            log.warning("max_edit_not_success", message_id=str(message_id)[:24],
+                        body=str(data)[:300])
+        return ok
     except Exception as e:  # noqa: BLE001
-        log.warning("max_edit_failed", message_id=message_id, error=str(e))
+        log.warning("max_edit_failed", message_id=str(message_id)[:24], error=str(e))
         return False
 
 

@@ -120,14 +120,18 @@ def finalize_card(post_id: int, message_id: str, header: str) -> bool:
     """Отредактировать карточку в финальное состояние: статус-заголовок + текст поста,
     БЕЗ кнопок (действие завершено, повторно нажать нельзя). Возвращает успех."""
     if get_settings().project.moderation.platform != "max" or not message_id:
+        log.info("finalize_card_skip", post_id=post_id, has_mid=bool(message_id))
         return False
     from aialarm.moderation import max_client
 
     p = get_pending(post_id)
     if not p:
+        log.info("finalize_card_skip", post_id=post_id, reason="no_pending")
         return False
     text = f"{header}\n{'─' * 20}\n{p['post_text']}"
-    return max_client.edit_message(message_id, text[:_CARD_LIMIT], buttons=None)
+    ok = max_client.edit_message(message_id, text[:_CARD_LIMIT], buttons=None)
+    log.info("finalize_card", post_id=post_id, mid=str(message_id)[:24], ok=ok)
+    return ok
 
 
 # ── Карточка-оригинал (шаг 1): «Переписать» / «Отменить» ─────────────────────
