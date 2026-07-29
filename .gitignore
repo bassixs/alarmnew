@@ -1,6 +1,9 @@
 .env
 config.yaml
 *.db
+*.db-shm
+*.db-wal
+*.db-journal
 *.session
 *.session-journal
 __pycache__/
