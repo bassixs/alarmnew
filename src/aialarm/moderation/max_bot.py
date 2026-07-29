@@ -20,13 +20,13 @@ from aialarm.config import get_settings
 from aialarm.control import get_pipeline_state, render_control_status, set_control_mode
 from aialarm.logging import get_logger
 from aialarm.moderation import max_client, service
-from aialarm.moderation.notify import edit_card, send_card
+from aialarm.moderation.notify import edit_card, finalize_card, send_card
 from aialarm.publishers.service import publish_post_id_sync
 
 log = get_logger(__name__)
 
-# user_id -> post_id, ожидающий исправленного текста
-_edit_state: dict[int, int] = {}
+# user_id -> (post_id, message_id карточки), ожидающий исправленного текста
+_edit_state: dict[int, tuple[int, str]] = {}
 
 
 def _control_allowed(user_id: int | None) -> bool:
@@ -133,18 +133,23 @@ def _handle_callback(update: dict) -> None:
             return
         if service.approve(post_id):
             ok = publish_post_id_sync(post_id)
-            max_client.answer_callback(cid, "✅ Опубликовано" if ok else "Одобрено, но публикация не удалась")
+            header = "✅ ОПУБЛИКОВАНО" if ok else "⚠️ Одобрено, публикация не удалась (см. логи)"
+            finalize_card(post_id, mid or "", header)
+            max_client.answer_callback(cid, "✅ Опубликовано" if ok else "Публикация не удалась")
         else:
             max_client.answer_callback(cid, "Уже обработано")
     elif action == "reject":
         service.reject(post_id)
+        finalize_card(post_id, mid or "", "❌ ОТКЛОНЕНО")
         max_client.answer_callback(cid, "❌ Отклонено")
     elif action == "edit":
         if not get_pipeline_state().active:
             max_client.answer_callback(cid, "Помощник сейчас вне смены")
             return
         if user_id is not None:
-            _edit_state[user_id] = post_id
+            _edit_state[user_id] = (post_id, mid or "")
+        # Убираем кнопки и показываем, что ждём текст (повторно нажать нельзя).
+        finalize_card(post_id, mid or "", "✏️ ЖДУ ИСПРАВЛЕННЫЙ ТЕКСТ…")
         max_client.answer_callback(cid, "✏️ Пришлите исправленный текст сообщением")
 
 
@@ -165,13 +170,19 @@ def _handle_message(msg: dict) -> None:
         _handle_control(control_actions[command], user_id)
         return
     if user_id in _edit_state and text:
-        post_id = _edit_state.pop(user_id)
+        post_id, card_mid = _edit_state.pop(user_id)
         service.apply_edit(post_id, text)
         ok = publish_post_id_sync(post_id)
-        chat = get_settings().project.moderation.max_chat_id
-        max_client.send_message(
-            chat, "✅ Исправлено и опубликовано" if ok else "Исправлено. Публикация не удалась (см. логи)"
+        header = (
+            "✅ ОПУБЛИКОВАНО (с правкой редактора)"
+            if ok
+            else "⚠️ Исправлено, публикация не удалась (см. логи)"
         )
+        # Редактируем исходную карточку в финальное состояние; если не вышло — шлём статус.
+        if not finalize_card(post_id, card_mid, header):
+            chat = get_settings().project.moderation.max_chat_id
+            if chat:
+                max_client.send_message(chat, header)
 
 
 def _dispatch(update: dict) -> None:

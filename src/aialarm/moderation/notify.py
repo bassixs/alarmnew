@@ -116,6 +116,20 @@ def send_card(post_id: int) -> None:
         send_moderation_card_sync(post_id)
 
 
+def finalize_card(post_id: int, message_id: str, header: str) -> bool:
+    """Отредактировать карточку в финальное состояние: статус-заголовок + текст поста,
+    БЕЗ кнопок (действие завершено, повторно нажать нельзя). Возвращает успех."""
+    if get_settings().project.moderation.platform != "max" or not message_id:
+        return False
+    from aialarm.moderation import max_client
+
+    p = get_pending(post_id)
+    if not p:
+        return False
+    text = f"{header}\n{'─' * 20}\n{p['post_text']}"
+    return max_client.edit_message(message_id, text[:_CARD_LIMIT], buttons=None)
+
+
 # ── Карточка-оригинал (шаг 1): «Переписать» / «Отменить» ─────────────────────
 def _preview_text(p: dict) -> str:
     sep = "─" * 20
