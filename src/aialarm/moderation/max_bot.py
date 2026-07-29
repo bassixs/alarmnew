@@ -14,6 +14,9 @@
 """
 from __future__ import annotations
 
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
 import time
 
 from aialarm.config import get_settings
@@ -27,6 +30,45 @@ log = get_logger(__name__)
 
 # user_id -> (post_id, message_id карточки), ожидающий исправленного текста
 _edit_state: dict[int, tuple[int, str]] = {}
+
+# Long-polling должен быстро подтверждать callback: LLM-рерайт, публикация на две
+# площадки и обновление карточки могут занять несколько секунд. Один post_id обрабатываем
+# только один раз, чтобы повторный тап не создал дубль публикации.
+_actions = ThreadPoolExecutor(max_workers=3, thread_name_prefix="max-action")
+_inflight_posts: set[int] = set()
+_inflight_lock = Lock()
+
+
+def _submit_post_action(
+    post_id: int,
+    action: Callable[[], None],
+    callback_id: str,
+    confirmation: str,
+) -> bool:
+    """Подтвердить callback до запуска тяжёлой задачи и не допустить дубль."""
+    with _inflight_lock:
+        if post_id in _inflight_posts:
+            return False
+        _inflight_posts.add(post_id)
+
+    def run() -> None:
+        try:
+            action()
+        except Exception as e:  # noqa: BLE001
+            log.error("max_background_action_failed", post_id=post_id, error=str(e))
+        finally:
+            with _inflight_lock:
+                _inflight_posts.discard(post_id)
+
+    try:
+        # Это снимает индикатор ожидания в MAX до LLM/API-вызовов ниже.
+        max_client.answer_callback(callback_id, confirmation)
+        _actions.submit(run)
+    except Exception:  # noqa: BLE001
+        with _inflight_lock:
+            _inflight_posts.discard(post_id)
+        raise
+    return True
 
 
 def _control_allowed(user_id: int | None) -> bool:
@@ -106,21 +148,17 @@ def _handle_callback(update: dict) -> None:
             if not get_pipeline_state().active:
                 max_client.answer_callback(cid, "Помощник сейчас вне смены")
                 return
-            max_client.answer_callback(cid, "✍️ Переписываю…")
-            post_id = service.rewrite_and_get(obj_id)
-            if post_id:
-                converted = bool(mid and edit_card(post_id, mid))
-                if not converted:
-                    # Запасной путь: сначала успешно отправляем новую карточку,
-                    # только затем убираем оригинал, чтобы ничего не потерять.
-                    send_card(post_id)
-                    if mid:
-                        max_client.delete_message(mid)
+            if not _submit_post_action(
+                obj_id, lambda: _rewrite_preview(obj_id, mid or ""), cid, "✍️ Переписываю…"
+            ):
+                max_client.answer_callback(cid, "⏳ Уже переписываю…")
+                return
         elif action == "cancel":
-            service.cancel_preview(obj_id)
-            if mid:
-                max_client.delete_message(mid)
-            max_client.answer_callback(cid, "🗑 Отменено")
+            if not _submit_post_action(
+                obj_id, lambda: _cancel_preview(obj_id, mid or ""), cid, "🗑 Отменено"
+            ):
+                max_client.answer_callback(cid, "⏳ Уже обрабатываю…")
+                return
         return
 
     # ── Шаг 2: готовый пост ───────────────────────────────────────────────
@@ -131,26 +169,59 @@ def _handle_callback(update: dict) -> None:
         if not get_pipeline_state().active:
             max_client.answer_callback(cid, "Помощник сейчас вне смены")
             return
-        if service.approve(post_id):
-            ok = publish_post_id_sync(post_id)
-            header = "✅ ОПУБЛИКОВАНО" if ok else "⚠️ Одобрено, публикация не удалась (см. логи)"
-            finalize_card(post_id, mid or "", header)
-            max_client.answer_callback(cid, "✅ Опубликовано" if ok else "Публикация не удалась")
-        else:
-            max_client.answer_callback(cid, "Уже обработано")
+        if not _submit_post_action(
+            post_id, lambda: _approve_and_publish(post_id, mid or ""), cid, "⏳ Публикую…"
+        ):
+            max_client.answer_callback(cid, "⏳ Уже публикую…")
+            return
     elif action == "reject":
-        service.reject(post_id)
-        finalize_card(post_id, mid or "", "❌ ОТКЛОНЕНО")
-        max_client.answer_callback(cid, "❌ Отклонено")
+        if not _submit_post_action(
+            post_id, lambda: _reject_post(post_id, mid or ""), cid, "❌ Отклонено"
+        ):
+            max_client.answer_callback(cid, "⏳ Уже обрабатываю…")
+            return
     elif action == "edit":
         if not get_pipeline_state().active:
             max_client.answer_callback(cid, "Помощник сейчас вне смены")
             return
         if user_id is not None:
             _edit_state[user_id] = (post_id, mid or "")
+        # Снимаем индикатор нажатия до сетевого обновления карточки.
+        max_client.answer_callback(cid, "✏️ Пришлите исправленный текст сообщением")
         # Убираем кнопки и показываем, что ждём текст (повторно нажать нельзя).
         finalize_card(post_id, mid or "", "✏️ ЖДУ ИСПРАВЛЕННЫЙ ТЕКСТ…")
-        max_client.answer_callback(cid, "✏️ Пришлите исправленный текст сообщением")
+
+
+def _rewrite_preview(raw_id: int, message_id: str) -> None:
+    post_id = service.rewrite_and_get(raw_id)
+    if not post_id:
+        return
+    converted = bool(message_id and edit_card(post_id, message_id))
+    if not converted:
+        # Запасной путь: сначала успешно отправляем новую карточку, только затем
+        # убираем оригинал — так карточка не потеряется при проблеме с MAX API.
+        send_card(post_id)
+        if message_id:
+            max_client.delete_message(message_id)
+
+
+def _cancel_preview(raw_id: int, message_id: str) -> None:
+    service.cancel_preview(raw_id)
+    if message_id:
+        max_client.delete_message(message_id)
+
+
+def _approve_and_publish(post_id: int, message_id: str) -> None:
+    if not service.approve(post_id):
+        return
+    ok = publish_post_id_sync(post_id)
+    header = "✅ ОПУБЛИКОВАНО" if ok else "⚠️ Одобрено, публикация не удалась (см. логи)"
+    finalize_card(post_id, message_id, header)
+
+
+def _reject_post(post_id: int, message_id: str) -> None:
+    service.reject(post_id)
+    finalize_card(post_id, message_id, "❌ ОТКЛОНЕНО")
 
 
 def _handle_message(msg: dict) -> None:
