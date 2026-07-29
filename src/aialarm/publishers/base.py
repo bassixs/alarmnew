@@ -21,11 +21,9 @@ class Post:
         return list(dict.fromkeys(refs))
 
     def rendered_text(self, max_len: int) -> str:
-        body = self.text
-        if self.hashtags:
-            tags = " ".join(h if h.startswith("#") else f"#{h}" for h in self.hashtags)
-            body = f"{body}\n\n{tags}"
-        return body[:max_len]
+        # Хэштеги могут пригодиться для внутренней аналитики, но редакционный канал
+        # их не публикует: читателю уходит только согласованный текст поста.
+        return self.text[:max_len]
 
 
 @dataclass(slots=True)

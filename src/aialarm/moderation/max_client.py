@@ -191,8 +191,8 @@ def callback_buttons(post_id: int) -> list:
     """Клавиатура готового поста: MAX отдельно или MAX вместе с Telegram."""
     return [
         [
-            {"type": "callback", "text": "✅ Опубликовать: MAX", "payload": f"mod:approve_max:{post_id}"},
-            {"type": "callback", "text": "✅ MAX + ТГ", "payload": f"mod:approve_all:{post_id}"},
+            {"type": "callback", "text": "MAX", "payload": f"mod:approve_max:{post_id}"},
+            {"type": "callback", "text": "MAX + ТГ", "payload": f"mod:approve_all:{post_id}"},
         ],
         [
             {"type": "callback", "text": "✏️ Править", "payload": f"mod:edit:{post_id}"},

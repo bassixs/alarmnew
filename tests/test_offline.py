@@ -50,10 +50,10 @@ def test_dedup_text_first_paragraph():
     assert "Первый абзац" in txt and "Второй" not in txt
 
 
-def test_post_render_with_hashtags_and_limit():
+def test_post_render_omits_hashtags_and_respects_limit():
     p = Post(text="Текст", hashtags=["город", "#новости"])
     rendered = p.rendered_text(1000)
-    assert "#город" in rendered and "#новости" in rendered
+    assert rendered == "Текст"
     assert len(Post(text="a" * 100).rendered_text(10)) == 10
 
 
