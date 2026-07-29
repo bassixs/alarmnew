@@ -215,7 +215,11 @@ def _approve_and_publish(post_id: int, message_id: str) -> None:
     if not service.approve(post_id):
         return
     ok = publish_post_id_sync(post_id)
-    header = "✅ ОПУБЛИКОВАНО" if ok else "⚠️ Одобрено, публикация не удалась (см. логи)"
+    header = (
+        "✅ ОПУБЛИКОВАНО"
+        if ok
+        else "⚠️ Не опубликовано на всех площадках — повтор будет автоматически"
+    )
     finalize_card(post_id, message_id, header)
 
 
@@ -247,7 +251,7 @@ def _handle_message(msg: dict) -> None:
         header = (
             "✅ ОПУБЛИКОВАНО (с правкой редактора)"
             if ok
-            else "⚠️ Исправлено, публикация не удалась (см. логи)"
+            else "⚠️ Не опубликовано на всех площадках — повтор будет автоматически"
         )
         # Статус всегда живёт ТОЛЬКО на карточке (finalize_card). Отдельное сообщение в чат
         # больше не шлём — иначе получались «два сообщения об одном действии».

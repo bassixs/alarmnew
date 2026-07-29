@@ -1,11 +1,15 @@
 """Офлайн-тесты: работают без сети, ключей и внешних сервисов."""
 from __future__ import annotations
 
+import asyncio
+from types import SimpleNamespace
+
 from aialarm.collectors.base import make_dedup_key
+from aialarm.db.models import Base, NewsStatus, Publication, PublishStatus, RawNews, RewrittenPost
 from aialarm.collectors.dedup import dedup_text
 from aialarm.filtering.rules import check_rules
 from aialarm.llm.embeddings import HashingTfidfEmbedder, cosine
-from aialarm.publishers.base import Post
+from aialarm.publishers.base import Post, PublishResult
 from aialarm.source_policy import source_matches
 
 
@@ -144,3 +148,60 @@ def test_tg_web_extracts_up_to_ten_album_images():
 def test_post_image_refs_are_unique():
     post = Post(text="text", image_url="one.jpg", image_urls=["one.jpg", "two.jpg"])
     assert post.image_refs() == ["one.jpg", "two.jpg"]
+
+
+def test_partial_publication_retries_only_failed_platform():
+    """Успешный Telegram не должен получить дубль при повторе MAX."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    from aialarm.publishers import service
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    calls: list[str] = []
+    results = {"telegram": [True], "max": [False, True]}
+
+    class FakePublisher:
+        def __init__(self, platform: str):
+            self.platform = platform
+
+        async def publish(self, post: Post) -> PublishResult:
+            calls.append(self.platform)
+            return PublishResult(ok=results[self.platform].pop(0))
+
+    original_settings = service.get_settings
+    original_publisher = service.get_publisher
+    service.get_settings = lambda: SimpleNamespace(
+        project=SimpleNamespace(publish=SimpleNamespace(targets=["telegram", "max"]))
+    )
+    service.get_publisher = lambda platform: FakePublisher(platform)
+    try:
+        with Session(engine) as session:
+            raw = RawNews(
+                dedup_key="partial-publish",
+                source_type="test",
+                source_url="https://example.test/news",
+                title="Заголовок",
+                body="Текст",
+                status=NewsStatus.APPROVED,
+            )
+            session.add(raw)
+            session.flush()
+            rewritten = RewrittenPost(raw_id=raw.id, post_text="Пост", hashtags=[])
+            session.add(rewritten)
+            session.flush()
+
+            assert not asyncio.run(service.publish_post(session, rewritten))
+            assert raw.status == NewsStatus.APPROVED
+            assert calls == ["telegram", "max"]
+
+            assert asyncio.run(service.publish_post(session, rewritten))
+            assert raw.status == NewsStatus.PUBLISHED
+            assert calls == ["telegram", "max", "max"]
+            assert session.query(Publication).filter_by(
+                post_id=rewritten.id, platform="telegram", status=PublishStatus.SUCCESS
+            ).count() == 1
+    finally:
+        service.get_settings = original_settings
+        service.get_publisher = original_publisher

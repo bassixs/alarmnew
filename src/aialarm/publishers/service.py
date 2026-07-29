@@ -47,9 +47,11 @@ def _last_publish_at(session: Session) -> datetime | None:
     )
 
 
-def can_publish_now(session: Session) -> tuple[bool, str]:
+def can_publish_now(session: Session, *, retrying: bool = False) -> tuple[bool, str]:
     pub = get_settings().project.publish
-    if _today_success_count(session) >= pub.max_posts_per_day:
+    # Доставку уже начатого поста не блокируем дневной квотой: иначе при успехе
+    # Telegram и сбое MAX второй канал может не дождаться повторной попытки до завтра.
+    if not retrying and _today_success_count(session) >= pub.max_posts_per_day:
         return False, "достигнут дневной лимит постов"
     last = _last_publish_at(session)
     if last is not None:
@@ -71,12 +73,69 @@ def _to_post(rp: RewrittenPost) -> Post:
     )
 
 
+def _targets() -> list[str]:
+    """Активные площадки без дублей и с сохранением порядка из конфига."""
+    return list(dict.fromkeys(get_settings().project.publish.targets))
+
+
+def _successful_platforms(session: Session, post_id: int) -> set[str]:
+    return set(
+        session.scalars(
+            select(Publication.platform).where(
+                Publication.post_id == post_id,
+                Publication.status == PublishStatus.SUCCESS,
+            )
+        ).all()
+    )
+
+
+def _pending_targets(session: Session, post_id: int) -> list[str]:
+    successful = _successful_platforms(session, post_id)
+    return [platform for platform in _targets() if platform not in successful]
+
+
+def _requeue_incomplete_publications(session: Session) -> int:
+    """Вернуть в очередь старые частично опубликованные посты.
+
+    До появления пер-платформенных повторов статус PUBLISHED ставился после первого
+    успешного канала. Эта проверка безопасно подхватывает такие записи: успешная
+    площадка повторно не вызывается, а недостающая будет доставлена на следующей стадии.
+    """
+    if not _targets():
+        return 0
+    rows = session.scalars(
+        select(RewrittenPost)
+        .join(RawNews, RewrittenPost.raw_id == RawNews.id)
+        .where(RawNews.status == NewsStatus.PUBLISHED)
+    ).all()
+    restored = 0
+    for rp in rows:
+        if _pending_targets(session, rp.id):
+            rp.raw.status = NewsStatus.APPROVED
+            restored += 1
+            log.warning("partial_publication_requeued", post_id=rp.id)
+    return restored
+
+
 async def publish_post(session: Session, rp: RewrittenPost) -> bool:
-    """Опубликовать один пост на все активные площадки. Возвращает True, если хоть куда-то ок."""
-    targets = get_settings().project.publish.targets
+    """Доставить пост на все ещё неуспешные площадки.
+
+    True означает, что пост есть на КАЖДОЙ активной площадке. Успешные каналы не
+    вызываются повторно, поэтому повторная попытка после частичного сбоя не создаёт дубль.
+    """
+    targets = _targets()
+    if not targets:
+        log.error("publish_no_targets", post_id=rp.id)
+        return False
+    pending = _pending_targets(session, rp.id)
+    if not pending:
+        if rp.raw:
+            rp.raw.status = NewsStatus.PUBLISHED
+        return True
+
     post = _to_post(rp)
-    any_ok = False
-    for platform in targets:
+    successful = set(targets) - set(pending)
+    for platform in pending:
         publisher = get_publisher(platform)
         result = await publisher.publish(post)
         status = (
@@ -94,11 +153,13 @@ async def publish_post(session: Session, rp: RewrittenPost) -> bool:
                 published_at=datetime.now(timezone.utc) if result.ok else None,
             )
         )
-        any_ok = any_ok or result.ok
+        if result.ok:
+            successful.add(platform)
         log.info("published", post_id=rp.id, platform=platform, ok=result.ok, error=result.error)
-    if any_ok and rp.raw:
+    complete = set(targets).issubset(successful)
+    if complete and rp.raw:
         rp.raw.status = NewsStatus.PUBLISHED
-    return any_ok
+    return complete
 
 
 def publish_post_id_sync(post_id: int) -> bool:
@@ -111,9 +172,10 @@ def publish_post_id_sync(post_id: int) -> bool:
 
 
 def run_publish_stage(limit: int = 10) -> dict[str, int]:
-    """Опубликовать одобренные посты, соблюдая лимиты частоты."""
-    stats = {"published": 0, "skipped": 0, "failed": 0}
+    """Опубликовать одобренные посты и повторить только недоставленные площадки."""
+    stats = {"published": 0, "skipped": 0, "failed": 0, "requeued_partial": 0}
     with session_scope() as session:
+        stats["requeued_partial"] = _requeue_incomplete_publications(session)
         rows = session.scalars(
             select(RewrittenPost)
             .join(RawNews, RewrittenPost.raw_id == RawNews.id)
@@ -122,7 +184,8 @@ def run_publish_stage(limit: int = 10) -> dict[str, int]:
             .limit(limit)
         ).all()
         for rp in rows:
-            ok_to_publish, why = can_publish_now(session)
+            retrying = bool(_successful_platforms(session, rp.id))
+            ok_to_publish, why = can_publish_now(session, retrying=retrying)
             if not ok_to_publish:
                 stats["skipped"] += 1
                 log.info("publish_skipped", post_id=rp.id, reason=why)

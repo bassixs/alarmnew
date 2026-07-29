@@ -77,7 +77,9 @@ def build_dispatcher() -> Dispatcher:
             if service.approve(post_id):
                 ok = await asyncio.to_thread(publish_post_id_sync, post_id)
                 await cq.message.answer(
-                    "✅ Опубликовано" if ok else "✅ Одобрено, но публикация не удалась (см. логи)"
+                    "✅ Опубликовано"
+                    if ok
+                    else "⚠️ Не опубликовано на всех площадках — повтор будет автоматически"
                 )
             else:
                 await cq.message.answer("Не найдено")
@@ -101,7 +103,9 @@ def build_dispatcher() -> Dispatcher:
         await state.clear()
         ok = await asyncio.to_thread(publish_post_id_sync, post_id)
         await message.answer(
-            "✅ Исправлено и опубликовано" if ok else "✅ Исправлено. Публикация не удалась (см. логи)"
+            "✅ Исправлено и опубликовано"
+            if ok
+            else "⚠️ Исправлено, но не опубликовано на всех площадках — повтор будет автоматически"
         )
 
     return dp
