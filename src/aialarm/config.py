@@ -43,6 +43,7 @@ class Secrets(BaseSettings):
 class SourceCfg(BaseModel):
     type: str  # rss | telegram | scrape | aggregator
     url: str
+    display_name: str = ""  # имя для читателя в строке «источник», без @username
     region: str = ""
     poll_interval_min: int = 15
     enabled: bool = True

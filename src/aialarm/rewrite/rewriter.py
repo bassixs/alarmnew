@@ -16,6 +16,7 @@ from aialarm.db.models import NewsStatus, RawNews, RewrittenPost
 from aialarm.llm.client import get_llm_client
 from aialarm.logging import get_logger
 from aialarm.media import raw_image_refs
+from aialarm.source_policy import source_matches
 
 log = get_logger(__name__)
 
@@ -44,6 +45,9 @@ _SYSTEM = """Ты — редактор Telegram/MAX-канала «{channel}».
   придумывай прямую речь.
 - Убирай повторы, общие вводные фразы и эмоциональные оценки. Пиши простым живым русским:
   без канцелярита, рекламного тона и предположений.
+- Если безопасная для обсуждения новость естественно предполагает разные мнения, опыт или
+  выбор читателей, можно закончить пост одним коротким нейтральным вопросом. Не добавляй
+  вопрос к новостям о трагедиях, преступлениях, ДТП, пожарах и другим чувствительным темам.
 - При уместности используй не более 1–2 эмодзи в стиле канала.
 - Не используй кликбейт и не искажай тональность источника.
 - НЕ добавляй сам подпись об источнике и хэштеги в конец текста — их подставит система.
@@ -70,10 +74,18 @@ def _attribution(source_url: str, has_image: bool) -> str:
     proj = get_settings().project
     parts: list[str] = []
     if has_image:
-        parts.append(f"— источник {_domain(source_url)}")
+        parts.append(f"— источник: {_source_name(source_url)}")
     if proj.publish.ai_disclosure.strip():
         parts.append(proj.publish.ai_disclosure.strip())
     return "\n".join(parts)
+
+
+def _source_name(url: str) -> str:
+    """Человекочитаемое название источника; @username никогда не выводим."""
+    for source in get_settings().project.sources:
+        if source_matches(source.url, url) and source.display_name.strip():
+            return source.display_name.strip()
+    return _domain(url)
 
 
 def _domain(url: str) -> str:
@@ -82,8 +94,11 @@ def _domain(url: str) -> str:
     parsed = urlparse(url)
     net = parsed.netloc
     if net in ("t.me", "telegram.me"):
-        seg = parsed.path.strip("/").split("/")[0]
-        return f"@{seg}" if seg else net  # Telegram-источник -> @канал
+        parts = parsed.path.strip("/").split("/")
+        if parts and parts[0] == "s":
+            parts.pop(0)
+        seg = parts[0] if parts else ""
+        return seg.replace("_", " ") if seg else net
     return net or url
 
 

@@ -11,6 +11,7 @@ channels:
 sources:
   - type: rss             # rss | telegram | scrape | aggregator
     url: "https://example-region-smi.ru/rss"
+    display_name: "Региональное СМИ" # имя для строки источника вместо @username
     region: "Регион"
     poll_interval_min: 15 # как часто опрашивать этот источник
     enabled: true

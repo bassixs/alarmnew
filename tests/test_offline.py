@@ -63,6 +63,12 @@ def test_source_matches_telegram_post_url():
     assert not source_matches("Evgeniy_Serkin", "https://t.me/another_channel/123")
 
 
+def test_telegram_source_label_has_no_username_prefix():
+    from aialarm.rewrite.rewriter import _domain
+
+    assert _domain("https://t.me/Evgeniy_Serkin/123") == "Evgeniy Serkin"
+
+
 def test_max_moderation_message_combines_image_and_buttons():
     from pathlib import Path
     from tempfile import TemporaryDirectory
