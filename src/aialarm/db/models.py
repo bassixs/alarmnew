@@ -52,6 +52,7 @@ class PublishStatus(str, enum.Enum):
     SUCCESS = "success"
     FAILED = "failed"
     RATE_LIMITED = "rate_limited"
+    SKIPPED = "skipped"  # площадка сознательно не выбрана редактором
 
 
 class PipelineControl(Base):

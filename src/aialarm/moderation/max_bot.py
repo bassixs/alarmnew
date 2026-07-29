@@ -165,12 +165,17 @@ def _handle_callback(update: dict) -> None:
     if prefix != "mod" or obj_id is None:
         return
     post_id = obj_id
-    if action == "approve":
+    if action in {"approve", "approve_max", "approve_all"}:
         if not get_pipeline_state().active:
             max_client.answer_callback(cid, "Помощник сейчас вне смены")
             return
+        selected_targets = ["max"] if action == "approve_max" else None
+        confirmation = "⏳ Публикую в MAX…" if selected_targets else "⏳ Публикую в MAX и ТГ…"
         if not _submit_post_action(
-            post_id, lambda: _approve_and_publish(post_id, mid or ""), cid, "⏳ Публикую…"
+            post_id,
+            lambda: _approve_and_publish(post_id, mid or "", selected_targets),
+            cid,
+            confirmation,
         ):
             max_client.answer_callback(cid, "⏳ Уже публикую…")
             return
@@ -211,10 +216,14 @@ def _cancel_preview(raw_id: int, message_id: str) -> None:
         max_client.delete_message(message_id)
 
 
-def _approve_and_publish(post_id: int, message_id: str) -> None:
+def _approve_and_publish(
+    post_id: int,
+    message_id: str,
+    selected_targets: list[str] | None = None,
+) -> None:
     if not service.approve(post_id):
         return
-    ok = publish_post_id_sync(post_id)
+    ok = publish_post_id_sync(post_id, selected_targets)
     header = (
         "✅ ОПУБЛИКОВАНО"
         if ok

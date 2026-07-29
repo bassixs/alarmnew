@@ -89,9 +89,37 @@ def _successful_platforms(session: Session, post_id: int) -> set[str]:
     )
 
 
+def _completed_platforms(session: Session, post_id: int) -> set[str]:
+    """Площадки, на которых пост уже доставлен или сознательно не запрошен."""
+    return set(
+        session.scalars(
+            select(Publication.platform).where(
+                Publication.post_id == post_id,
+                Publication.status.in_((PublishStatus.SUCCESS, PublishStatus.SKIPPED)),
+            )
+        ).all()
+    )
+
+
 def _pending_targets(session: Session, post_id: int) -> list[str]:
-    successful = _successful_platforms(session, post_id)
-    return [platform for platform in _targets() if platform not in successful]
+    completed = _completed_platforms(session, post_id)
+    return [platform for platform in _targets() if platform not in completed]
+
+
+def _skip_unselected_targets(session: Session, post_id: int, selected: list[str]) -> None:
+    """Зафиксировать, что редактор намеренно выбрал не все площадки."""
+    selected_set = set(selected)
+    completed = _completed_platforms(session, post_id)
+    for platform in _targets():
+        if platform not in selected_set and platform not in completed:
+            session.add(
+                Publication(
+                    post_id=post_id,
+                    platform=platform,
+                    status=PublishStatus.SKIPPED,
+                    error="not selected by moderator",
+                )
+            )
 
 
 def _requeue_incomplete_publications(session: Session) -> int:
@@ -117,7 +145,11 @@ def _requeue_incomplete_publications(session: Session) -> int:
     return restored
 
 
-async def publish_post(session: Session, rp: RewrittenPost) -> bool:
+async def publish_post(
+    session: Session,
+    rp: RewrittenPost,
+    selected_targets: list[str] | None = None,
+) -> bool:
     """Доставить пост на все ещё неуспешные площадки.
 
     True означает, что пост есть на КАЖДОЙ активной площадке. Успешные каналы не
@@ -127,6 +159,13 @@ async def publish_post(session: Session, rp: RewrittenPost) -> bool:
     if not targets:
         log.error("publish_no_targets", post_id=rp.id)
         return False
+    if selected_targets is not None:
+        selected = [platform for platform in selected_targets if platform in targets]
+        if not selected:
+            log.error("publish_no_selected_targets", post_id=rp.id, requested=selected_targets)
+            return False
+        _skip_unselected_targets(session, rp.id, selected)
+
     pending = _pending_targets(session, rp.id)
     if not pending:
         if rp.raw:
@@ -162,13 +201,13 @@ async def publish_post(session: Session, rp: RewrittenPost) -> bool:
     return complete
 
 
-def publish_post_id_sync(post_id: int) -> bool:
+def publish_post_id_sync(post_id: int, selected_targets: list[str] | None = None) -> bool:
     """Синхронная обёртка для вызова из бота-модератора (кнопка «Опубликовать»)."""
     with session_scope() as session:
         rp = session.get(RewrittenPost, post_id)
         if not rp:
             return False
-        return asyncio.run(publish_post(session, rp))
+        return asyncio.run(publish_post(session, rp, selected_targets))
 
 
 def run_publish_stage(limit: int = 10) -> dict[str, int]:

@@ -205,3 +205,56 @@ def test_partial_publication_retries_only_failed_platform():
     finally:
         service.get_settings = original_settings
         service.get_publisher = original_publisher
+
+
+def test_max_only_publication_does_not_retry_telegram():
+    """Выбор MAX не должен позже превратиться в автопубликацию в Telegram."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    from aialarm.publishers import service
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    calls: list[str] = []
+
+    class FakePublisher:
+        def __init__(self, platform: str):
+            self.platform = platform
+
+        async def publish(self, post: Post) -> PublishResult:
+            calls.append(self.platform)
+            return PublishResult(ok=True)
+
+    original_settings = service.get_settings
+    original_publisher = service.get_publisher
+    service.get_settings = lambda: SimpleNamespace(
+        project=SimpleNamespace(publish=SimpleNamespace(targets=["telegram", "max"]))
+    )
+    service.get_publisher = lambda platform: FakePublisher(platform)
+    try:
+        with Session(engine) as session:
+            raw = RawNews(
+                dedup_key="max-only-publish",
+                source_type="test",
+                source_url="https://example.test/news",
+                title="Заголовок",
+                body="Текст",
+                status=NewsStatus.APPROVED,
+            )
+            session.add(raw)
+            session.flush()
+            rewritten = RewrittenPost(raw_id=raw.id, post_text="Пост", hashtags=[])
+            session.add(rewritten)
+            session.flush()
+
+            assert asyncio.run(service.publish_post(session, rewritten, ["max"]))
+            assert raw.status == NewsStatus.PUBLISHED
+            assert calls == ["max"]
+            assert session.query(Publication).filter_by(
+                post_id=rewritten.id, platform="telegram", status=PublishStatus.SKIPPED
+            ).count() == 1
+            assert not service._pending_targets(session, rewritten.id)
+    finally:
+        service.get_settings = original_settings
+        service.get_publisher = original_publisher
