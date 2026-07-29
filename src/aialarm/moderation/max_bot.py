@@ -178,11 +178,10 @@ def _handle_message(msg: dict) -> None:
             if ok
             else "⚠️ Исправлено, публикация не удалась (см. логи)"
         )
-        # Редактируем исходную карточку в финальное состояние; если не вышло — шлём статус.
-        if not finalize_card(post_id, card_mid, header):
-            chat = get_settings().project.moderation.max_chat_id
-            if chat:
-                max_client.send_message(chat, header)
+        # Статус всегда живёт ТОЛЬКО на карточке (finalize_card). Отдельное сообщение в чат
+        # больше не шлём — иначе получались «два сообщения об одном действии».
+        finalized = finalize_card(post_id, card_mid, header)
+        log.info("edit_published", post_id=post_id, ok=ok, card_updated=finalized)
 
 
 def _dispatch(update: dict) -> None:
