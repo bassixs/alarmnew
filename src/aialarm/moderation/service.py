@@ -174,7 +174,9 @@ def apply_edit(post_id: int, new_text: str) -> bool:
             return False
         rp.post_text = new_text
         rp.edited_by_moderator = True
-        rp.raw.status = NewsStatus.APPROVED
+        # Правка не означает согласие на публикацию: редактор должен ещё выбрать
+        # площадку (MAX или MAX + ТГ) либо окончательно отклонить карточку.
+        rp.raw.status = NewsStatus.MODERATION
         log.info("moderation_edited", post_id=post_id)
         return True
 

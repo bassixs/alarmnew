@@ -99,14 +99,15 @@ def build_dispatcher() -> Dispatcher:
     async def on_edit_text(message: Message, state: FSMContext) -> None:
         data = await state.get_data()
         post_id = int(data["post_id"])
-        service.apply_edit(post_id, message.text or "")
+        saved = service.apply_edit(post_id, message.text or "")
         await state.clear()
-        ok = await asyncio.to_thread(publish_post_id_sync, post_id)
-        await message.answer(
-            "✅ Исправлено и опубликовано"
-            if ok
-            else "⚠️ Исправлено, но не опубликовано на всех площадках — повтор будет автоматически"
-        )
+        if not saved:
+            await message.answer("Не удалось сохранить правку. Откройте карточку ещё раз.")
+            return
+        from aialarm.moderation.notify import send_card
+
+        await asyncio.to_thread(send_card, post_id)
+        await message.answer("✏️ Правка сохранена. Выберите площадку публикации на новой карточке.")
 
     return dp
 

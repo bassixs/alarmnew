@@ -255,17 +255,14 @@ def _handle_message(msg: dict) -> None:
         return
     if user_id in _edit_state and text:
         post_id, card_mid = _edit_state.pop(user_id)
-        service.apply_edit(post_id, text)
-        ok = publish_post_id_sync(post_id)
-        header = (
-            "✅ ОПУБЛИКОВАНО (с правкой редактора)"
-            if ok
-            else "⚠️ Не опубликовано на всех площадках — повтор будет автоматически"
-        )
-        # Статус всегда живёт ТОЛЬКО на карточке (finalize_card). Отдельное сообщение в чат
-        # больше не шлём — иначе получались «два сообщения об одном действии».
-        finalized = finalize_card(post_id, card_mid, header)
-        log.info("edit_published", post_id=post_id, ok=ok, card_updated=finalized)
+        if not service.apply_edit(post_id, text):
+            log.warning("edit_save_failed", post_id=post_id)
+            return
+        # Возвращаем редактору тот же выбор площадки уже с исправленным текстом.
+        updated = bool(card_mid and edit_card(post_id, card_mid))
+        if not updated:
+            send_card(post_id)
+        log.info("edit_returned_to_moderation", post_id=post_id, card_updated=updated)
 
 
 def _dispatch(update: dict) -> None:

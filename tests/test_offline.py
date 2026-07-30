@@ -69,6 +69,33 @@ def test_telegram_source_label_has_no_username_prefix():
     assert _domain("https://t.me/Evgeniy_Serkin/123") == "Evgeniy Serkin"
 
 
+def test_max_edit_returns_to_publish_choice_without_autopublish():
+    from aialarm.moderation import max_bot
+
+    calls: list[tuple] = []
+    original_apply_edit = max_bot.service.apply_edit
+    original_edit_card = max_bot.edit_card
+    original_send_card = max_bot.send_card
+    original_publish = max_bot.publish_post_id_sync
+    try:
+        max_bot._edit_state[42] = (7, "mid-7")
+        max_bot.service.apply_edit = lambda post_id, text: calls.append(("save", post_id, text)) or True
+        max_bot.edit_card = lambda post_id, mid: calls.append(("card", post_id, mid)) or True
+        max_bot.send_card = lambda post_id: calls.append(("send", post_id))
+        max_bot.publish_post_id_sync = lambda *args: (_ for _ in ()).throw(
+            AssertionError("Правка не должна публиковаться автоматически")
+        )
+
+        max_bot._handle_message({"sender": {"user_id": 42}, "body": {"text": "Исправленный текст"}})
+        assert calls == [("save", 7, "Исправленный текст"), ("card", 7, "mid-7")]
+    finally:
+        max_bot._edit_state.pop(42, None)
+        max_bot.service.apply_edit = original_apply_edit
+        max_bot.edit_card = original_edit_card
+        max_bot.send_card = original_send_card
+        max_bot.publish_post_id_sync = original_publish
+
+
 def test_max_moderation_message_combines_image_and_buttons():
     from pathlib import Path
     from tempfile import TemporaryDirectory
