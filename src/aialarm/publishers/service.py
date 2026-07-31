@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from aialarm.config import get_settings
+from aialarm.control import get_publish_profile
 from aialarm.db import session_scope
 from aialarm.db.models import (
     NewsStatus,
@@ -166,6 +167,9 @@ async def publish_post(
             return False
         _skip_unselected_targets(session, rp.id, selected)
 
+    profile = rp.publish_profile or get_publish_profile()
+    if not rp.publish_profile:
+        rp.publish_profile = profile
     pending = _pending_targets(session, rp.id)
     if not pending:
         if rp.raw:
@@ -175,7 +179,7 @@ async def publish_post(
     post = _to_post(rp)
     successful = set(targets) - set(pending)
     for platform in pending:
-        publisher = get_publisher(platform)
+        publisher = get_publisher(platform, profile)
         result = await publisher.publish(post)
         status = (
             PublishStatus.SUCCESS
@@ -194,7 +198,14 @@ async def publish_post(
         )
         if result.ok:
             successful.add(platform)
-        log.info("published", post_id=rp.id, platform=platform, ok=result.ok, error=result.error)
+        log.info(
+            "published",
+            post_id=rp.id,
+            platform=platform,
+            profile=profile,
+            ok=result.ok,
+            error=result.error,
+        )
     complete = set(targets).issubset(successful)
     if complete and rp.raw:
         rp.raw.status = NewsStatus.PUBLISHED

@@ -52,9 +52,27 @@ class SourceCfg(BaseModel):
     extra: dict = Field(default_factory=dict)  # напр. {"selectors": {"body": "div.article"}}
 
 
-class ChannelsCfg(BaseModel):
+class ChannelProfileCfg(BaseModel):
     telegram: str = ""
     max: str = ""
+
+
+class ChannelsCfg(ChannelProfileCfg):
+    """Каналы тестового и основного контуров.
+
+    Верхние telegram/max сохранены для обратной совместимости и считаются тестовым
+    профилем, пока блок test не заполнен.
+    """
+
+    test: ChannelProfileCfg = Field(default_factory=ChannelProfileCfg)
+    main: ChannelProfileCfg = Field(default_factory=ChannelProfileCfg)
+
+
+def channels_for_profile(profile: str) -> ChannelProfileCfg:
+    channels = get_settings().project.channels
+    if profile == "main":
+        return channels.main
+    return channels.test if (channels.test.telegram or channels.test.max) else channels
 
 
 class FilterCfg(BaseModel):

@@ -39,13 +39,13 @@ class Publisher(Protocol):
     async def publish(self, post: Post) -> PublishResult: ...
 
 
-def get_publisher(platform: str) -> Publisher:
+def get_publisher(platform: str, profile: str | None = None) -> Publisher:
     if platform == "telegram":
         from aialarm.publishers.telegram import TelegramPublisher
 
-        return TelegramPublisher()
+        return TelegramPublisher(profile)
     if platform == "max":
         from aialarm.publishers.max import MaxPublisher
 
-        return MaxPublisher()
+        return MaxPublisher(profile)
     raise ValueError(f"Неизвестная площадка публикации: {platform}")

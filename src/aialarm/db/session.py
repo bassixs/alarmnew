@@ -38,13 +38,27 @@ def init_db() -> None:
     """Создать таблицы (пилот). В проде — Alembic-миграции."""
     _get_factory()
     Base.metadata.create_all(_engine)
-    # create_all не добавляет колонки в существующую SQLite. Добавляем список фото
-    # небольшой встроенной миграцией; старое image_url остаётся для совместимости.
+    # create_all не добавляет колонки в существующую SQLite. Небольшие миграции
+    # для пилота; старое image_url остаётся для совместимости.
     if _engine.dialect.name == "sqlite":
-        columns = {column["name"] for column in inspect(_engine).get_columns("raw_news")}
-        if "image_urls" not in columns:
-            with _engine.begin() as connection:
+        with _engine.begin() as connection:
+            raw_columns = {column["name"] for column in inspect(_engine).get_columns("raw_news")}
+            if "image_urls" not in raw_columns:
                 connection.exec_driver_sql("ALTER TABLE raw_news ADD COLUMN image_urls JSON")
+            control_columns = {
+                column["name"] for column in inspect(_engine).get_columns("pipeline_control")
+            }
+            if "publish_profile" not in control_columns:
+                connection.exec_driver_sql(
+                    "ALTER TABLE pipeline_control ADD COLUMN publish_profile VARCHAR(16) DEFAULT 'test'"
+                )
+            post_columns = {
+                column["name"] for column in inspect(_engine).get_columns("rewritten_posts")
+            }
+            if "publish_profile" not in post_columns:
+                connection.exec_driver_sql(
+                    "ALTER TABLE rewritten_posts ADD COLUMN publish_profile VARCHAR(16) DEFAULT ''"
+                )
 
 
 def get_session() -> Session:

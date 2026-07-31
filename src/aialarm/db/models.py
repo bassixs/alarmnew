@@ -62,6 +62,7 @@ class PipelineControl(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     mode: Mapped[str] = mapped_column(String(16), default="auto")
+    publish_profile: Mapped[str] = mapped_column(String(16), default="test")
     override_started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -124,6 +125,8 @@ class RewrittenPost(Base):
     suggested_image_prompt: Mapped[str] = mapped_column(Text, default="")
     hashtags: Mapped[list[str]] = mapped_column(JSON, default=list)
     model: Mapped[str] = mapped_column(String(64), default="")
+    # Контур фиксируется при первой попытке, чтобы повтор не ушёл в другой канал.
+    publish_profile: Mapped[str] = mapped_column(String(16), default="")
     edited_by_moderator: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

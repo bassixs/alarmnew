@@ -211,8 +211,10 @@ def preview_buttons(raw_id: int) -> list:
     ]
 
 
-def control_buttons() -> list:
-    """Панель сменного режима помощника."""
+def control_buttons(profile: str = "test") -> list:
+    """Панель сменного режима и контура публикации."""
+    test_label = "🧪 Тест ✓" if profile == "test" else "🧪 Тест"
+    main_label = "🚀 Основной ✓" if profile == "main" else "🚀 Основной"
     return [
         [
             {"type": "callback", "text": "▶️ Включить", "payload": "ctl:on"},
@@ -221,5 +223,9 @@ def control_buttons() -> list:
         [
             {"type": "callback", "text": "🕒 AUTO", "payload": "ctl:auto"},
             {"type": "callback", "text": "📊 Статус", "payload": "ctl:status"},
+        ],
+        [
+            {"type": "callback", "text": test_label, "payload": "ctl:profile_test"},
+            {"type": "callback", "text": main_label, "payload": "ctl:profile_main"},
         ],
     ]

@@ -7,6 +7,13 @@ project_name: "aialarm"
 channels:
   telegram: ""            # @username канала или числовой chat_id (-100...)
   max: ""                 # id канала в MAX
+  # Два независимых контура. Пока test не задан, используются telegram/max выше.
+  test:
+    telegram: ""
+    max: ""
+  main:
+    telegram: ""
+    max: ""
 
 sources:
   - type: rss             # rss | telegram | scrape | aggregator

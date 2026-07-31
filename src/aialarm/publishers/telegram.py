@@ -16,7 +16,8 @@ from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramRetryAfter, TelegramAPIError
 from aiogram.types import BufferedInputFile, InputMediaPhoto
 
-from aialarm.config import get_settings
+from aialarm.config import channels_for_profile, get_settings
+from aialarm.control import get_publish_profile
 from aialarm.logging import get_logger
 from aialarm.publishers.base import Post, PublishResult
 from aialarm.publishers.footer import render_footer
@@ -51,14 +52,16 @@ def _html_body(post: Post, limit: int) -> str:
 class TelegramPublisher:
     platform = "telegram"
 
-    def __init__(self):
+    def __init__(self, profile: str | None = None):
         s = get_settings()
+        self._profile = profile or get_publish_profile()
+        channels = channels_for_profile(self._profile)
         self._token = s.secrets.telegram_bot_token
-        self._chat_id = s.project.channels.telegram
+        self._chat_id = channels.telegram
 
     async def publish(self, post: Post) -> PublishResult:
         if not self._token or not self._chat_id:
-            return PublishResult(ok=False, error="TELEGRAM_BOT_TOKEN или channels.telegram не заданы")
+            return PublishResult(ok=False, error=f"Telegram не настроен для профиля {self._profile}")
 
         bot = Bot(self._token)
         try:

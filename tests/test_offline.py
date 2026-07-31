@@ -205,10 +205,12 @@ def test_partial_publication_retries_only_failed_platform():
 
     original_settings = service.get_settings
     original_publisher = service.get_publisher
+    original_profile = service.get_publish_profile
     service.get_settings = lambda: SimpleNamespace(
         project=SimpleNamespace(publish=SimpleNamespace(targets=["telegram", "max"]))
     )
-    service.get_publisher = lambda platform: FakePublisher(platform)
+    service.get_publish_profile = lambda: "test"
+    service.get_publisher = lambda platform, profile=None: FakePublisher(platform)
     try:
         with Session(engine) as session:
             raw = RawNews(
@@ -238,6 +240,7 @@ def test_partial_publication_retries_only_failed_platform():
     finally:
         service.get_settings = original_settings
         service.get_publisher = original_publisher
+        service.get_publish_profile = original_profile
 
 
 def test_max_only_publication_does_not_retry_telegram():
@@ -261,10 +264,12 @@ def test_max_only_publication_does_not_retry_telegram():
 
     original_settings = service.get_settings
     original_publisher = service.get_publisher
+    original_profile = service.get_publish_profile
     service.get_settings = lambda: SimpleNamespace(
         project=SimpleNamespace(publish=SimpleNamespace(targets=["telegram", "max"]))
     )
-    service.get_publisher = lambda platform: FakePublisher(platform)
+    service.get_publish_profile = lambda: "test"
+    service.get_publisher = lambda platform, profile=None: FakePublisher(platform)
     try:
         with Session(engine) as session:
             raw = RawNews(
@@ -291,3 +296,4 @@ def test_max_only_publication_does_not_retry_telegram():
     finally:
         service.get_settings = original_settings
         service.get_publisher = original_publisher
+        service.get_publish_profile = original_profile

@@ -12,7 +12,8 @@ from pathlib import Path
 
 import httpx
 
-from aialarm.config import get_settings
+from aialarm.config import channels_for_profile, get_settings
+from aialarm.control import get_publish_profile
 from aialarm.logging import get_logger
 from aialarm.media import MAX_IMAGES_PER_POST
 from aialarm.publishers.base import Post, PublishResult
@@ -40,10 +41,12 @@ async def _load_bytes(ref: str) -> bytes | None:
 class MaxPublisher:
     platform = "max"
 
-    def __init__(self):
+    def __init__(self, profile: str | None = None):
         s = get_settings()
+        self._profile = profile or get_publish_profile()
+        channels = channels_for_profile(self._profile)
         self._token = s.secrets.max_bot_token
-        self._chat_id = s.project.channels.max
+        self._chat_id = channels.max
         self._base = s.project.max_platform.base_url.rstrip("/")
         self._auth = s.project.max_platform.auth_header
 
@@ -79,7 +82,7 @@ class MaxPublisher:
 
     async def publish(self, post: Post) -> PublishResult:
         if not self._token or not self._chat_id:
-            return PublishResult(ok=False, error="MAX_BOT_TOKEN или channels.max не заданы")
+            return PublishResult(ok=False, error=f"MAX не настроен для профиля {self._profile}")
 
         body: dict = {"text": self._text(post), "format": "markdown"}
         try:

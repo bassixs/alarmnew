@@ -20,7 +20,13 @@ from threading import Lock
 import time
 
 from aialarm.config import get_settings
-from aialarm.control import get_pipeline_state, render_control_status, set_control_mode
+from aialarm.control import (
+    get_pipeline_state,
+    get_publish_profile,
+    render_control_status,
+    set_control_mode,
+    set_publish_profile,
+)
 from aialarm.logging import get_logger
 from aialarm.moderation import max_client, service
 from aialarm.moderation.notify import edit_card, finalize_card, send_card
@@ -88,6 +94,10 @@ def _control_notice(action: str, active: bool) -> str:
         return "▶️ Помощник включён вручную"
     if action == "off":
         return "⏸ Помощник выключен вручную"
+    if action == "profile_test":
+        return "🧪 Выбран тестовый контур публикации"
+    if action == "profile_main":
+        return "🚀 Выбран основной контур публикации"
     return ""
 
 
@@ -95,7 +105,7 @@ def _send_control_panel(message_id: str = "", notice: str = "") -> None:
     text = render_control_status()
     if notice:
         text = f"{notice}\n\n{text}"
-    buttons = max_client.control_buttons()
+    buttons = max_client.control_buttons(get_publish_profile())
     if message_id and max_client.edit_message(message_id, text, buttons=buttons):
         return
     chat = get_settings().project.moderation.max_chat_id
@@ -124,6 +134,14 @@ def _handle_control(
                 else f"Помощник {'включён' if state.active else 'выключен'}"
             )
             max_client.answer_callback(callback_id, callback_text)
+    elif action in {"profile_test", "profile_main"}:
+        profile = set_publish_profile("test" if action == "profile_test" else "main")
+        notice = _control_notice(action, True)
+        if callback_id:
+            max_client.answer_callback(
+                callback_id,
+                "Тестовый контур" if profile == "test" else "Основной контур",
+            )
     elif action == "status" and callback_id:
         max_client.answer_callback(callback_id, "Статус обновлён")
     _send_control_panel(message_id=message_id, notice=notice)

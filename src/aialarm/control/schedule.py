@@ -167,6 +167,31 @@ def set_control_mode(mode: str, now: datetime | None = None) -> EffectivePipelin
     return get_pipeline_state(now_utc)
 
 
+def get_publish_profile() -> str:
+    """Текущий контур публикации, сохранённый отдельно от расписания смен."""
+    with session_scope() as session:
+        row = session.get(PipelineControl, 1)
+        if row is None:
+            row = PipelineControl(id=1, publish_profile="test")
+            session.add(row)
+            session.flush()
+        profile = (row.publish_profile or "test").lower()
+        return profile if profile in {"test", "main"} else "test"
+
+
+def set_publish_profile(profile: str) -> str:
+    profile = profile.lower()
+    if profile not in {"test", "main"}:
+        raise ValueError(f"Неизвестный контур публикации: {profile}")
+    with session_scope() as session:
+        row = session.get(PipelineControl, 1)
+        if row is None:
+            row = PipelineControl(id=1)
+            session.add(row)
+        row.publish_profile = profile
+    return profile
+
+
 def _local_hm(value: datetime | None, tz_name: str) -> str:
     if value is None:
         return "—"
@@ -183,6 +208,7 @@ def render_control_status(state: EffectivePipelineState | None = None) -> str:
         f"Часовой пояс: {state.timezone_name}",
         f"Будни: {cfg.weekday_start}–{cfg.weekday_end}",
         f"Выходные: {cfg.weekend_start}–{cfg.weekend_end}",
+        f"Контур публикации: {'🚀 ОСНОВНОЙ' if get_publish_profile() == 'main' else '🧪 ТЕСТ'}",
     ]
     if state.override_until:
         lines.append(f"Ручной режим до: {_local_hm(state.override_until, state.timezone_name)}")
