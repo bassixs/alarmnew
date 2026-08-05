@@ -82,6 +82,9 @@ class RawNews(Base):
     source_type: Mapped[str] = mapped_column(String(32))
     source_url: Mapped[str] = mapped_column(Text)
     region: Mapped[str] = mapped_column(String(128), default="")
+    # Новость пришла из закреплённого районного источника и не должна попадать
+    # в общую городскую очередь модерации.
+    is_district_source: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     title: Mapped[str] = mapped_column(Text)
     body: Mapped[str] = mapped_column(Text, default="")
     image_url: Mapped[str | None] = mapped_column(Text, nullable=True)

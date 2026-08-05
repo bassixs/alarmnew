@@ -57,7 +57,10 @@ def route_previews(
     stats = {"to_preview": 0, "auto_approved": 0}
     to_notify: list[int] = []
     with session_scope() as session:
-        stmt = select(RawNews).where(RawNews.status == NewsStatus.RELEVANT)
+        stmt = select(RawNews).where(
+            RawNews.status == NewsStatus.RELEVANT,
+            RawNews.is_district_source.is_(False),
+        )
         if collected_since is not None:
             stmt = stmt.where(RawNews.collected_at >= collected_since)
         rows = session.scalars(stmt.limit(limit)).all()

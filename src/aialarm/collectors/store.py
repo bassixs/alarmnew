@@ -12,7 +12,7 @@ from aialarm.db.models import NewsStatus, RawNews
 from aialarm.llm.embeddings import get_embedder
 from aialarm.logging import get_logger
 from aialarm.media import MAX_IMAGES_PER_POST, raw_image_refs
-from aialarm.source_policy import visual_allowed
+from aialarm.source_policy import source_matches, visual_allowed
 
 log = get_logger(__name__)
 
@@ -48,6 +48,13 @@ def _backfill_images(raw: RawNews, item: CollectedItem) -> None:
         raw.image_url = refs[0]
 
 
+def _is_district_source(item: CollectedItem) -> bool:
+    return any(
+        source.district_id and source_matches(source.url, item.item_url or item.source_url)
+        for source in get_settings().project.sources
+    )
+
+
 def store_items(items: list[CollectedItem]) -> dict[str, int]:
     """Записать новые новости. Возвращает счётчики для мониторинга."""
     cfg = get_settings().project
@@ -75,6 +82,7 @@ def store_items(items: list[CollectedItem]) -> dict[str, int]:
                 source_type=item.source_type,
                 source_url=item.item_url or item.source_url,
                 region=item.region,
+                is_district_source=_is_district_source(item),
                 title=item.title,
                 body=item.body,
                 image_url=image_refs[0] if image_refs else None,

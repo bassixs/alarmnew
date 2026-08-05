@@ -45,6 +45,10 @@ def init_db() -> None:
             raw_columns = {column["name"] for column in inspect(_engine).get_columns("raw_news")}
             if "image_urls" not in raw_columns:
                 connection.exec_driver_sql("ALTER TABLE raw_news ADD COLUMN image_urls JSON")
+            if "is_district_source" not in raw_columns:
+                connection.exec_driver_sql(
+                    "ALTER TABLE raw_news ADD COLUMN is_district_source BOOLEAN DEFAULT 0"
+                )
             control_columns = {
                 column["name"] for column in inspect(_engine).get_columns("pipeline_control")
             }
