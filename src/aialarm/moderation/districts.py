@@ -144,9 +144,19 @@ def rewrite_district_post(post_id: int) -> bool:
         if not district:
             return False
         llm = get_settings().project.llm
+        district_system = _build_system(f"{district.title} — новости района") + """
+
+Дополнительные правила для районного канала:
+- Пиши для жителей именно этого района: называй конкретный населённый пункт, улицу,
+  учреждение или событие, если они есть в исходнике.
+- Не заменяй локальный контекст общими словами «в регионе» или «в области».
+- Для небольших, но полезных местных новостей (школы, культура, спорт, ЖКХ, дороги,
+  расписания, благоустройство) выбирай практичную суть: что произошло и кого это касается.
+- Не преувеличивай масштаб районной новости и не делай её похожей на официальный пресс-релиз.
+"""
         data = get_llm_client().structured(
             model=llm.rewrite_model,
-            system=_build_system(f"{district.title} — новости района"),
+            system=district_system,
             user=f'Новость: "{post.raw.title}. {(post.raw.body or "")[:4000]}"',
             schema=_SCHEMA,
             max_tokens=llm.max_tokens,
