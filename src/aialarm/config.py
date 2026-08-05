@@ -81,6 +81,9 @@ class DistrictCfg(BaseModel):
 class DistrictsCfg(BaseModel):
     enabled: bool = False
     moderation_max_chat_id: str = ""
+    timezone: str = "Europe/Moscow"
+    daily_start: str = "09:00"
+    daily_end: str = "21:00"
     weekday_max_posts: int = 3
     weekend_max_posts: int = 1
     min_minutes_between_posts: int = 60

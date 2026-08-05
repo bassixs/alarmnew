@@ -16,6 +16,14 @@ CFG = DutyScheduleCfg(
     weekend_end="23:00",
 )
 
+DISTRICT_CFG = DutyScheduleCfg(
+    timezone="Europe/Moscow",
+    weekday_start="09:00",
+    weekday_end="21:00",
+    weekend_start="09:00",
+    weekend_end="21:00",
+)
+
 
 def _utc(value: str) -> datetime:
     return datetime.fromisoformat(value).replace(tzinfo=timezone.utc)
@@ -38,6 +46,14 @@ def test_weekend_window_moscow():
     assert active.active
     assert active.end_utc == _utc("2026-08-01T20:00:00")
     assert not resolve_schedule(_utc("2026-08-01T20:00:00"), CFG).active
+
+
+def test_district_window_is_same_on_weekdays_and_weekends():
+    # 09:00–21:00 МСК: понедельник и суббота работают по одному окну.
+    assert resolve_schedule(_utc("2026-07-27T06:00:00"), DISTRICT_CFG).active
+    assert resolve_schedule(_utc("2026-08-01T06:00:00"), DISTRICT_CFG).active
+    assert not resolve_schedule(_utc("2026-07-27T18:00:00"), DISTRICT_CFG).active
+    assert not resolve_schedule(_utc("2026-08-01T18:00:00"), DISTRICT_CFG).active
 
 
 def test_next_transition():

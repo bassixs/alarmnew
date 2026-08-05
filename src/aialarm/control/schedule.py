@@ -128,8 +128,9 @@ def _effective_state(
     mode: str,
     override_started: datetime | None,
     override_until: datetime | None,
+    cfg: DutyScheduleCfg | None = None,
 ) -> EffectivePipelineState:
-    cfg = get_settings().project.duty_schedule
+    cfg = cfg or get_settings().project.duty_schedule
     scheduled = resolve_schedule(now_utc, cfg)
     override_valid = mode in {"on", "off"} and bool(
         override_until and override_until > now_utc
@@ -165,10 +166,23 @@ def get_pipeline_state(now: datetime | None = None) -> EffectivePipelineState:
     return _effective_state(now_utc, mode, override_started, override_until)
 
 
+def _district_schedule_cfg() -> DutyScheduleCfg:
+    cfg = get_settings().project.districts
+    return DutyScheduleCfg(
+        timezone=cfg.timezone,
+        weekday_start=cfg.daily_start,
+        weekday_end=cfg.daily_end,
+        weekend_start=cfg.daily_start,
+        weekend_end=cfg.daily_end,
+    )
+
+
 def get_district_pipeline_state(now: datetime | None = None) -> EffectivePipelineState:
     now_utc = _utc(now or datetime.now(timezone.utc))
     mode, override_started, override_until = _load_district_control()
-    return _effective_state(now_utc, mode, override_started, override_until)
+    return _effective_state(
+        now_utc, mode, override_started, override_until, _district_schedule_cfg()
+    )
 
 
 def set_control_mode(mode: str, now: datetime | None = None) -> EffectivePipelineState:
@@ -199,7 +213,7 @@ def set_district_control_mode(mode: str, now: datetime | None = None) -> Effecti
     if mode not in {"auto", "on", "off"}:
         raise ValueError(f"Неизвестный районный режим: {mode}")
     now_utc = _utc(now or datetime.now(timezone.utc))
-    scheduled = resolve_schedule(now_utc)
+    scheduled = resolve_schedule(now_utc, _district_schedule_cfg())
     with session_scope() as session:
         row = session.get(PipelineControl, 1)
         if row is None:
@@ -270,7 +284,7 @@ def render_district_control_status(state: EffectivePipelineState | None = None) 
     state = state or get_district_pipeline_state()
     project = get_settings().project
     cfg = project.districts
-    schedule = project.duty_schedule
+    schedule = _district_schedule_cfg()
     profile = get_district_publish_profile()
     mode_names = {"auto": "AUTO", "on": "ON вручную", "off": "OFF вручную"}
     configured = sum(
