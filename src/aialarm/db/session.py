@@ -60,6 +60,18 @@ def init_db() -> None:
                 connection.exec_driver_sql(
                     "ALTER TABLE pipeline_control ADD COLUMN district_publish_profile VARCHAR(16) DEFAULT 'test'"
                 )
+            if "district_mode" not in control_columns:
+                connection.exec_driver_sql(
+                    "ALTER TABLE pipeline_control ADD COLUMN district_mode VARCHAR(16) DEFAULT 'auto'"
+                )
+            if "district_override_started_at" not in control_columns:
+                connection.exec_driver_sql(
+                    "ALTER TABLE pipeline_control ADD COLUMN district_override_started_at DATETIME"
+                )
+            if "district_override_until" not in control_columns:
+                connection.exec_driver_sql(
+                    "ALTER TABLE pipeline_control ADD COLUMN district_override_until DATETIME"
+                )
             post_columns = {
                 column["name"] for column in inspect(_engine).get_columns("rewritten_posts")
             }

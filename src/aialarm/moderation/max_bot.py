@@ -22,12 +22,14 @@ import time
 from aialarm.config import get_settings
 from aialarm.control import (
     get_district_publish_profile,
+    get_district_pipeline_state,
     get_pipeline_state,
     get_publish_profile,
     render_control_status,
     render_district_control_status,
     set_control_mode,
     set_district_publish_profile,
+    set_district_control_mode,
     set_publish_profile,
 )
 from aialarm.logging import get_logger
@@ -166,11 +168,32 @@ def _handle_district_control(
     if not _control_allowed(user_id):
         max_client.answer_callback(callback_id, "Нет доступа к управлению")
         return
-    if action not in {"profile_test", "profile_main"}:
+    if action in {"on", "off", "auto"}:
+        state = set_district_control_mode(action)
+        notice = (
+            "▶️ Районный помощник включён вручную"
+            if action == "on"
+            else "⏸ Районный помощник выключен вручную"
+            if action == "off"
+            else "🕒 Районный помощник работает по расписанию"
+        )
+        callback_text = (
+            "AUTO"
+            if action == "auto"
+            else "Включён"
+            if state.active
+            else "Выключен"
+        )
+        max_client.answer_callback(callback_id, callback_text)
+    elif action in {"profile_test", "profile_main"}:
+        profile = set_district_publish_profile("test" if action == "profile_test" else "main")
+        max_client.answer_callback(callback_id, "Тестовый контур" if profile == "test" else "Основной контур")
+        notice = "🧪 Выбран тестовый контур" if profile == "test" else "🚀 Выбран основной контур"
+    elif action == "status":
+        max_client.answer_callback(callback_id, "Статус обновлён")
+        notice = ""
+    else:
         return
-    profile = set_district_publish_profile("test" if action == "profile_test" else "main")
-    max_client.answer_callback(callback_id, "Тестовый контур" if profile == "test" else "Основной контур")
-    notice = "🧪 Выбран тестовый контур" if profile == "test" else "🚀 Выбран основной контур"
     _send_district_control_panel(message_id, notice)
 
 
@@ -227,6 +250,9 @@ def _handle_callback(update: dict) -> None:
     # ── Районный контур: отдельные карточки и публикация ровно в один канал ──
     if prefix == "dpre" and obj_id is not None:
         if action == "rewrite":
+            if not get_district_pipeline_state().active:
+                max_client.answer_callback(cid, "Районный помощник сейчас вне смены")
+                return
             if not _submit_district_action(
                 obj_id, lambda: _rewrite_district_preview(obj_id, mid or ""), cid, "✍️ Переписываю…"
             ):
@@ -240,6 +266,9 @@ def _handle_callback(update: dict) -> None:
 
     if prefix == "dmod" and obj_id is not None:
         if action == "approve":
+            if not get_district_pipeline_state().active:
+                max_client.answer_callback(cid, "Районный помощник сейчас вне смены")
+                return
             if not _submit_district_action(
                 obj_id, lambda: _publish_district_post(obj_id, mid or ""), cid, "⏳ Публикую в районный канал…"
             ):
@@ -250,6 +279,9 @@ def _handle_callback(update: dict) -> None:
             ):
                 max_client.answer_callback(cid, "⏳ Уже обрабатываю…")
         elif action == "edit":
+            if not get_district_pipeline_state().active:
+                max_client.answer_callback(cid, "Районный помощник сейчас вне смены")
+                return
             if user_id is not None:
                 _district_edit_state[user_id] = (obj_id, mid or "")
             max_client.answer_callback(cid, "✏️ Пришлите исправленный текст сообщением")

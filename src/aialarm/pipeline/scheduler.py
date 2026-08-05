@@ -14,10 +14,14 @@ from datetime import datetime, timedelta, timezone
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 from aialarm.config import district_channel, get_settings
-from aialarm.control import get_district_publish_profile
+from aialarm.control import (
+    get_district_pipeline_state,
+    get_district_publish_profile,
+    get_pipeline_state,
+    render_control_status,
+)
 from aialarm.db import init_db
 from aialarm.collectors.images import cleanup_old
-from aialarm.control import get_pipeline_state, render_control_status
 from aialarm.filtering import run_filter_stage
 from aialarm.logging import configure_logging, get_logger
 from aialarm.moderation.service import route_previews
@@ -35,8 +39,9 @@ _source_last_collected: dict[str, datetime] = {}
 
 def _collection_job() -> None:
     state = get_pipeline_state()
-    if not state.active:
-        log.info("collection_skipped_outside_duty", mode=state.mode)
+    district_state = get_district_pipeline_state()
+    if not state.active and not district_state.active:
+        log.info("collection_skipped_outside_duty", mode=state.mode, district_mode=district_state.mode)
         return
     now = datetime.now(timezone.utc)
     sources = get_settings().project.sources
@@ -45,7 +50,14 @@ def _collection_job() -> None:
         source.url
         for source in sources
         if source.enabled
-        and (not source.district_id or district_channel(source.district_id, district_profile))
+        and (
+            (not source.district_id and state.active)
+            or (
+                source.district_id
+                and district_state.active
+                and district_channel(source.district_id, district_profile)
+            )
+        )
         and (
             source.url not in _source_last_collected
             or now - _source_last_collected[source.url]
@@ -54,7 +66,12 @@ def _collection_job() -> None:
     }
     if not due:
         return
-    run_collection_sync(source_urls=due, published_since=state.active_since)
+    main_due = {source.url for source in sources if source.url in due and not source.district_id}
+    district_due = {source.url for source in sources if source.url in due and source.district_id}
+    if main_due:
+        run_collection_sync(source_urls=main_due, published_since=state.active_since)
+    if district_due:
+        run_collection_sync(source_urls=district_due, published_since=district_state.active_since)
     # Ошибочный источник не должен мгновенно забивать лог повторными запросами.
     for source_url in due:
         _source_last_collected[source_url] = now
@@ -62,12 +79,16 @@ def _collection_job() -> None:
 
 def _processing_job() -> None:
     state = get_pipeline_state()
-    if not state.active:
-        log.info("processing_skipped_outside_duty", mode=state.mode)
+    district_state = get_district_pipeline_state()
+    if not state.active and not district_state.active:
+        log.info("processing_skipped_outside_duty", mode=state.mode, district_mode=district_state.mode)
         return
-    run_filter_stage(collected_since=state.active_since)
-    route_previews(collected_since=state.active_since)
-    route_district_previews(collected_since=state.active_since)
+    if state.active:
+        run_filter_stage(collected_since=state.active_since, district_only=False)
+        route_previews(collected_since=state.active_since)
+    if district_state.active:
+        run_filter_stage(collected_since=district_state.active_since, district_only=True)
+        route_district_previews(collected_since=district_state.active_since)
     cleanup_old(days=1)       # чистим старые скачанные картинки
 
 

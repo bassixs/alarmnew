@@ -234,10 +234,20 @@ def control_buttons(profile: str = "test") -> list:
 def district_control_buttons(profile: str = "test") -> list:
     test_label = "🧪 Тест ✓" if profile == "test" else "🧪 Тест"
     main_label = "🚀 Основной ✓" if profile == "main" else "🚀 Основной"
-    return [[
-        {"type": "callback", "text": test_label, "payload": "dctl:profile_test"},
-        {"type": "callback", "text": main_label, "payload": "dctl:profile_main"},
-    ]]
+    return [
+        [
+            {"type": "callback", "text": "▶️ Включить", "payload": "dctl:on"},
+            {"type": "callback", "text": "⏸ Выключить", "payload": "dctl:off"},
+        ],
+        [
+            {"type": "callback", "text": "🕒 AUTO", "payload": "dctl:auto"},
+            {"type": "callback", "text": "📊 Статус", "payload": "dctl:status"},
+        ],
+        [
+            {"type": "callback", "text": test_label, "payload": "dctl:profile_test"},
+            {"type": "callback", "text": main_label, "payload": "dctl:profile_main"},
+        ],
+    ]
 
 
 def district_preview_buttons(post_id: int) -> list:

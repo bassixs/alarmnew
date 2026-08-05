@@ -109,6 +109,15 @@ def test_district_cards_are_marked_and_target_one_channel():
     assert all("approve_all" not in button["payload"] for row in ready for button in row)
 
 
+def test_district_control_buttons_include_independent_schedule_controls():
+    from aialarm.moderation import max_client
+
+    payloads = [
+        button["payload"] for row in max_client.district_control_buttons() for button in row
+    ]
+    assert {"dctl:on", "dctl:off", "dctl:auto", "dctl:status"}.issubset(payloads)
+
+
 def test_district_classifier_uses_local_selection_rules():
     from aialarm.filtering import llm_classifier
 

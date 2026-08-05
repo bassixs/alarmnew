@@ -62,12 +62,19 @@ class PipelineControl(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     mode: Mapped[str] = mapped_column(String(16), default="auto")
+    district_mode: Mapped[str] = mapped_column(String(16), default="auto")
     publish_profile: Mapped[str] = mapped_column(String(16), default="test")
     district_publish_profile: Mapped[str] = mapped_column(String(16), default="test")
     override_started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     override_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    district_override_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    district_override_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )

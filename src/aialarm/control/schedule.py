@@ -109,15 +109,31 @@ def _load_control() -> tuple[str, datetime | None, datetime | None]:
         )
 
 
-def get_pipeline_state(now: datetime | None = None) -> EffectivePipelineState:
-    now_utc = _utc(now or datetime.now(timezone.utc))
+def _load_district_control() -> tuple[str, datetime | None, datetime | None]:
+    with session_scope() as session:
+        row = session.get(PipelineControl, 1)
+        if row is None:
+            row = PipelineControl(id=1)
+            session.add(row)
+            session.flush()
+        return (
+            (row.district_mode or "auto").lower(),
+            _utc(row.district_override_started_at) if row.district_override_started_at else None,
+            _utc(row.district_override_until) if row.district_override_until else None,
+        )
+
+
+def _effective_state(
+    now_utc: datetime,
+    mode: str,
+    override_started: datetime | None,
+    override_until: datetime | None,
+) -> EffectivePipelineState:
     cfg = get_settings().project.duty_schedule
     scheduled = resolve_schedule(now_utc, cfg)
-    mode, override_started, override_until = _load_control()
     override_valid = mode in {"on", "off"} and bool(
         override_until and override_until > now_utc
     )
-
     if override_valid:
         active = mode == "on"
         if active and scheduled.active:
@@ -132,7 +148,6 @@ def get_pipeline_state(now: datetime | None = None) -> EffectivePipelineState:
         active_since = scheduled.start_utc if active else None
         effective_mode = "auto"
         override_until = None
-
     return EffectivePipelineState(
         active=active,
         mode=effective_mode,
@@ -142,6 +157,18 @@ def get_pipeline_state(now: datetime | None = None) -> EffectivePipelineState:
         next_transition=scheduled.next_transition_utc,
         timezone_name=cfg.timezone,
     )
+
+
+def get_pipeline_state(now: datetime | None = None) -> EffectivePipelineState:
+    now_utc = _utc(now or datetime.now(timezone.utc))
+    mode, override_started, override_until = _load_control()
+    return _effective_state(now_utc, mode, override_started, override_until)
+
+
+def get_district_pipeline_state(now: datetime | None = None) -> EffectivePipelineState:
+    now_utc = _utc(now or datetime.now(timezone.utc))
+    mode, override_started, override_until = _load_district_control()
+    return _effective_state(now_utc, mode, override_started, override_until)
 
 
 def set_control_mode(mode: str, now: datetime | None = None) -> EffectivePipelineState:
@@ -165,6 +192,28 @@ def set_control_mode(mode: str, now: datetime | None = None) -> EffectivePipelin
             row.override_started_at = now_utc
             row.override_until = scheduled.next_transition_utc or (now_utc + timedelta(days=1))
     return get_pipeline_state(now_utc)
+
+
+def set_district_control_mode(mode: str, now: datetime | None = None) -> EffectivePipelineState:
+    mode = mode.lower()
+    if mode not in {"auto", "on", "off"}:
+        raise ValueError(f"Неизвестный районный режим: {mode}")
+    now_utc = _utc(now or datetime.now(timezone.utc))
+    scheduled = resolve_schedule(now_utc)
+    with session_scope() as session:
+        row = session.get(PipelineControl, 1)
+        if row is None:
+            row = PipelineControl(id=1)
+            session.add(row)
+        row.district_mode = mode
+        row.updated_at = now_utc
+        if mode == "auto":
+            row.district_override_started_at = None
+            row.district_override_until = None
+        else:
+            row.district_override_started_at = now_utc
+            row.district_override_until = scheduled.next_transition_utc or (now_utc + timedelta(days=1))
+    return get_district_pipeline_state(now_utc)
 
 
 def get_publish_profile() -> str:
@@ -217,19 +266,33 @@ def set_district_publish_profile(profile: str) -> str:
     return profile
 
 
-def render_district_control_status() -> str:
-    cfg = get_settings().project.districts
+def render_district_control_status(state: EffectivePipelineState | None = None) -> str:
+    state = state or get_district_pipeline_state()
+    project = get_settings().project
+    cfg = project.districts
+    schedule = project.duty_schedule
     profile = get_district_publish_profile()
+    mode_names = {"auto": "AUTO", "on": "ON вручную", "off": "OFF вручную"}
     configured = sum(
         1 for item in cfg.items if (item.main_max if profile == "main" else item.test_max)
     )
     return "\n".join(
         [
-            "🏘 Районный контур",
+            f"🏘 Районный помощник: {'ВКЛЮЧЁН' if state.active else 'ВЫКЛЮЧЕН'}",
+            f"Режим: {mode_names.get(state.mode, state.mode)}",
+            f"Часовой пояс: {state.timezone_name}",
+            f"Будни: {schedule.weekday_start}–{schedule.weekday_end}",
+            f"Выходные: {schedule.weekend_start}–{schedule.weekend_end}",
             f"Контур публикации: {'🚀 ОСНОВНОЙ' if profile == 'main' else '🧪 ТЕСТ'}",
             f"Каналов в выбранном контуре: {configured}",
             f"Лимит: {cfg.weekday_max_posts} в будни / {cfg.weekend_max_posts} в выходные на район",
         ]
+    ) + (
+        f"\nРучной режим до: {_local_hm(state.override_until, state.timezone_name)}"
+        if state.override_until
+        else f"\nСледующее переключение: {_local_hm(state.next_transition, state.timezone_name)}"
+        if state.next_transition
+        else ""
     )
 
 
