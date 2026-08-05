@@ -137,12 +137,13 @@ def test_district_classifier_uses_local_selection_rules():
         llm_classifier.get_settings, llm_classifier.get_llm_client = old_settings, old_client
 
 
-def test_rewrite_prompt_requires_plain_language_and_practical_first_paragraph():
+def test_plain_language_rewrite_rules_are_district_only():
     from aialarm.rewrite.rewriter import _SYSTEM
+    from aialarm.moderation.districts import _DISTRICT_REWRITE_APPENDIX
 
-    assert "что, где и когда" in _SYSTEM
-    assert "обычный житель понял новость с первого прочтения" in _SYSTEM
-    assert "уважаемые жители" in _SYSTEM
+    assert "что, где и когда" not in _SYSTEM
+    assert "обычный житель понял новость с первого прочтения" not in _SYSTEM
+    assert "обычный житель понял новость с первого прочтения" in _DISTRICT_REWRITE_APPENDIX
 
 
 def test_max_edit_returns_to_publish_choice_without_autopublish():
