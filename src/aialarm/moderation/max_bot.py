@@ -21,27 +21,33 @@ import time
 
 from aialarm.config import get_settings
 from aialarm.control import (
+    get_district_publish_profile,
     get_pipeline_state,
     get_publish_profile,
     render_control_status,
+    render_district_control_status,
     set_control_mode,
+    set_district_publish_profile,
     set_publish_profile,
 )
 from aialarm.logging import get_logger
-from aialarm.moderation import max_client, service
-from aialarm.moderation.notify import edit_card, finalize_card, send_card
+from aialarm.moderation import districts, max_client, service
+from aialarm.moderation.notify import (
+    edit_card, edit_district_card, finalize_card, finalize_district_card, send_card,
+)
 from aialarm.publishers.service import publish_post_id_sync
 
 log = get_logger(__name__)
 
 # user_id -> (post_id, message_id карточки), ожидающий исправленного текста
 _edit_state: dict[int, tuple[int, str]] = {}
+_district_edit_state: dict[int, tuple[int, str]] = {}
 
 # Long-polling должен быстро подтверждать callback: LLM-рерайт, публикация на две
 # площадки и обновление карточки могут занять несколько секунд. Один post_id обрабатываем
 # только один раз, чтобы повторный тап не создал дубль публикации.
 _actions = ThreadPoolExecutor(max_workers=3, thread_name_prefix="max-action")
-_inflight_posts: set[int] = set()
+_inflight_posts: set[tuple[str, int]] = set()
 _inflight_lock = Lock()
 
 
@@ -52,10 +58,11 @@ def _submit_post_action(
     confirmation: str,
 ) -> bool:
     """Подтвердить callback до запуска тяжёлой задачи и не допустить дубль."""
+    key = ("main", post_id)
     with _inflight_lock:
-        if post_id in _inflight_posts:
+        if key in _inflight_posts:
             return False
-        _inflight_posts.add(post_id)
+        _inflight_posts.add(key)
 
     def run() -> None:
         try:
@@ -64,7 +71,7 @@ def _submit_post_action(
             log.error("max_background_action_failed", post_id=post_id, error=str(e))
         finally:
             with _inflight_lock:
-                _inflight_posts.discard(post_id)
+                _inflight_posts.discard(key)
 
     try:
         # Это снимает индикатор ожидания в MAX до LLM/API-вызовов ниже.
@@ -72,7 +79,35 @@ def _submit_post_action(
         _actions.submit(run)
     except Exception:  # noqa: BLE001
         with _inflight_lock:
-            _inflight_posts.discard(post_id)
+            _inflight_posts.discard(key)
+        raise
+    return True
+
+
+def _submit_district_action(
+    post_id: int, action: Callable[[], None], callback_id: str, confirmation: str
+) -> bool:
+    key = ("district", post_id)
+    with _inflight_lock:
+        if key in _inflight_posts:
+            return False
+        _inflight_posts.add(key)
+
+    def run() -> None:
+        try:
+            action()
+        except Exception as exc:  # noqa: BLE001
+            log.error("district_background_action_failed", post_id=post_id, error=str(exc))
+        finally:
+            with _inflight_lock:
+                _inflight_posts.discard(key)
+
+    try:
+        max_client.answer_callback(callback_id, confirmation)
+        _actions.submit(run)
+    except Exception:
+        with _inflight_lock:
+            _inflight_posts.discard(key)
         raise
     return True
 
@@ -111,6 +146,32 @@ def _send_control_panel(message_id: str = "", notice: str = "") -> None:
     chat = get_settings().project.moderation.max_chat_id
     if chat:
         max_client.send_message(chat, text, buttons=buttons)
+
+
+def _send_district_control_panel(message_id: str = "", notice: str = "") -> None:
+    text = render_district_control_status()
+    if notice:
+        text = f"{notice}\n\n{text}"
+    buttons = max_client.district_control_buttons(get_district_publish_profile())
+    if message_id and max_client.edit_message(message_id, text, buttons=buttons):
+        return
+    chat = get_settings().project.districts.moderation_max_chat_id
+    if chat:
+        max_client.send_message(chat, text, buttons=buttons)
+
+
+def _handle_district_control(
+    action: str, user_id: int | None, callback_id: str, message_id: str
+) -> None:
+    if not _control_allowed(user_id):
+        max_client.answer_callback(callback_id, "Нет доступа к управлению")
+        return
+    if action not in {"profile_test", "profile_main"}:
+        return
+    profile = set_district_publish_profile("test" if action == "profile_test" else "main")
+    max_client.answer_callback(callback_id, "Тестовый контур" if profile == "test" else "Основной контур")
+    notice = "🧪 Выбран тестовый контур" if profile == "test" else "🚀 Выбран основной контур"
+    _send_district_control_panel(message_id, notice)
 
 
 def _handle_control(
@@ -158,6 +219,41 @@ def _handle_callback(update: dict) -> None:
 
     if prefix == "ctl":
         _handle_control(action, user_id, cid, mid or "")
+        return
+    if prefix == "dctl":
+        _handle_district_control(action, user_id, cid, mid or "")
+        return
+
+    # ── Районный контур: отдельные карточки и публикация ровно в один канал ──
+    if prefix == "dpre" and obj_id is not None:
+        if action == "rewrite":
+            if not _submit_district_action(
+                obj_id, lambda: _rewrite_district_preview(obj_id, mid or ""), cid, "✍️ Переписываю…"
+            ):
+                max_client.answer_callback(cid, "⏳ Уже переписываю…")
+        elif action == "cancel":
+            if not _submit_district_action(
+                obj_id, lambda: _cancel_district_post(obj_id, mid or ""), cid, "🗑 Отменено"
+            ):
+                max_client.answer_callback(cid, "⏳ Уже обрабатываю…")
+        return
+
+    if prefix == "dmod" and obj_id is not None:
+        if action == "approve":
+            if not _submit_district_action(
+                obj_id, lambda: _publish_district_post(obj_id, mid or ""), cid, "⏳ Публикую в районный канал…"
+            ):
+                max_client.answer_callback(cid, "⏳ Уже публикую…")
+        elif action == "reject":
+            if not _submit_district_action(
+                obj_id, lambda: _reject_district_post(obj_id, mid or ""), cid, "❌ Отклонено"
+            ):
+                max_client.answer_callback(cid, "⏳ Уже обрабатываю…")
+        elif action == "edit":
+            if user_id is not None:
+                _district_edit_state[user_id] = (obj_id, mid or "")
+            max_client.answer_callback(cid, "✏️ Пришлите исправленный текст сообщением")
+            finalize_district_card(obj_id, mid or "", "✏️ ЖДУ ИСПРАВЛЕННЫЙ ТЕКСТ…")
         return
 
     # ── Шаг 1: карточка-оригинал ──────────────────────────────────────────
@@ -234,6 +330,29 @@ def _cancel_preview(raw_id: int, message_id: str) -> None:
         max_client.delete_message(message_id)
 
 
+def _rewrite_district_preview(post_id: int, message_id: str) -> None:
+    if not districts.rewrite_district_post(post_id):
+        return
+    if not edit_district_card(post_id, message_id):
+        log.warning("district_card_edit_failed", post_id=post_id)
+
+
+def _cancel_district_post(post_id: int, message_id: str) -> None:
+    if districts.cancel_district_post(post_id) and message_id:
+        max_client.delete_message(message_id)
+
+
+def _publish_district_post(post_id: int, message_id: str) -> None:
+    ok, reason = districts.publish_district_post(post_id)
+    header = "✅ ОПУБЛИКОВАНО" if ok else f"⚠️ НЕ ОПУБЛИКОВАНО: {reason}"
+    finalize_district_card(post_id, message_id, header)
+
+
+def _reject_district_post(post_id: int, message_id: str) -> None:
+    if districts.cancel_district_post(post_id):
+        finalize_district_card(post_id, message_id, "❌ ОТКЛОНЕНО")
+
+
 def _approve_and_publish(
     post_id: int,
     message_id: str,
@@ -260,6 +379,7 @@ def _handle_message(msg: dict) -> None:
     user_id = sender.get("user_id")
     text = (msg.get("body") or {}).get("text", "")
     command = text.strip().split(maxsplit=1)[0].split("@", 1)[0].lower() if text.strip() else ""
+    chat_id = str((msg.get("recipient") or {}).get("chat_id") or "")
     control_actions = {
         "/start": "status",
         "/bot": "status",
@@ -269,7 +389,18 @@ def _handle_message(msg: dict) -> None:
         "/bot_auto": "auto",
     }
     if command in control_actions:
+        if chat_id and chat_id == get_settings().project.districts.moderation_max_chat_id:
+            _send_district_control_panel()
+            return
         _handle_control(control_actions[command], user_id)
+        return
+    if user_id in _district_edit_state and text:
+        post_id, card_mid = _district_edit_state.pop(user_id)
+        if not districts.edit_district_post(post_id, text):
+            log.warning("district_edit_save_failed", post_id=post_id)
+            return
+        if not edit_district_card(post_id, card_mid):
+            log.warning("district_edit_card_failed", post_id=post_id)
         return
     if user_id in _edit_state and text:
         post_id, card_mid = _edit_state.pop(user_id)

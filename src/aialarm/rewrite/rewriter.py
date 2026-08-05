@@ -54,14 +54,14 @@ _SYSTEM = """Ты — редактор Telegram/MAX-канала «{channel}».
 Ответь строго по схеме инструмента (post_text, suggested_image_prompt, hashtags)."""
 
 
-def _build_system() -> str:
+def _build_system(channel: str | None = None) -> str:
     proj = get_settings().project
     examples = ""
     ex = [e for e in proj.tone_examples if e.strip()]
     if ex:
         examples = "Характерные примеры постов канала:\n" + "\n---\n".join(ex)
     return _SYSTEM.format(
-        channel=proj.project_name,
+        channel=channel or proj.project_name,
         tone=proj.tone_of_voice or "нейтральный, человеческий",
         examples=examples,
         post_length=proj.post_length,

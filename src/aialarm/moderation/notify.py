@@ -10,6 +10,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aialarm.config import get_settings
 from aialarm.logging import get_logger
 from aialarm.moderation.service import get_pending, get_preview
+from aialarm.moderation.districts import get_district_pending, get_district_preview
 
 log = get_logger(__name__)
 
@@ -208,6 +209,63 @@ def send_preview(raw_id: int) -> None:
         _send_preview_max(raw_id)
     else:
         asyncio.run(_send_preview_tg(raw_id))
+
+
+# ── Районные карточки в отдельном MAX-чате ───────────────────────────────────
+def _district_prefix(p: dict, original: bool = False) -> str:
+    state = "❗ ОРИГИНАЛ (не переписан)" if original else "🏘 ГОТОВЫЙ ПОСТ"
+    return f"{state}\n📍 РАЙОН: {p['district_title']}\n{'─' * 20}\n"
+
+
+def _district_preview_text(p: dict) -> str:
+    return (_district_prefix(p, original=True) + f"🔗 источник: {p['source_url']}\n{'─' * 20}\n\n" + p["body"])[
+        :_CARD_LIMIT
+    ]
+
+
+def _district_card_text(p: dict) -> str:
+    meta = (
+        _district_prefix(p)
+        + f"📊 Подходит каналу: {p['confidence']} из 100\n"
+        + f"🔗 источник: {p['source_url']}\n{'─' * 20}\n"
+    )
+    return (meta + p["post_text"])[ :_CARD_LIMIT]
+
+
+def send_district_preview(post_id: int) -> None:
+    from aialarm.moderation import max_client
+
+    chat = get_settings().project.districts.moderation_max_chat_id
+    p = get_district_preview(post_id)
+    if not chat or not p:
+        log.warning("district_preview_notify_skip", post_id=post_id)
+        return
+    max_client.send_message(
+        chat, _district_preview_text(p), buttons=max_client.district_preview_buttons(post_id),
+        image_refs=(p.get("image_urls") or [])[:1],
+    )
+
+
+def edit_district_card(post_id: int, message_id: str) -> bool:
+    from aialarm.moderation import max_client
+
+    p = get_district_pending(post_id)
+    if not p or not message_id:
+        return False
+    return max_client.edit_message(
+        message_id, _district_card_text(p), buttons=max_client.district_callback_buttons(post_id),
+        image_refs=(p.get("image_urls") or [])[:1],
+    )
+
+
+def finalize_district_card(post_id: int, message_id: str, header: str) -> bool:
+    from aialarm.moderation import max_client
+
+    p = get_district_pending(post_id)
+    if not p or not message_id:
+        return False
+    text = f"{header}\n📍 РАЙОН: {p['district_title']}\n{'─' * 20}\n{p['post_text'] or p['body']}"
+    return max_client.edit_message(message_id, text[:_CARD_LIMIT], buttons=None)
 
 
 async def _alert(text: str) -> None:

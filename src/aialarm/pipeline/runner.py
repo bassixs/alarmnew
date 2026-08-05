@@ -14,6 +14,7 @@ from aialarm.config import SourceCfg, get_settings
 from aialarm.filtering import run_filter_stage
 from aialarm.logging import get_logger
 from aialarm.moderation.service import route_previews
+from aialarm.moderation.districts import route_district_previews
 from aialarm.publishers.service import run_publish_stage
 
 log = get_logger(__name__)
@@ -83,6 +84,7 @@ def run_processing() -> dict[str, dict]:
     result = {
         "filter": run_filter_stage(),
         "preview": route_previews(),
+        "district_preview": route_district_previews(),
         "publish": run_publish_stage(),
     }
     return result

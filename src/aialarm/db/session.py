@@ -52,6 +52,10 @@ def init_db() -> None:
                 connection.exec_driver_sql(
                     "ALTER TABLE pipeline_control ADD COLUMN publish_profile VARCHAR(16) DEFAULT 'test'"
                 )
+            if "district_publish_profile" not in control_columns:
+                connection.exec_driver_sql(
+                    "ALTER TABLE pipeline_control ADD COLUMN district_publish_profile VARCHAR(16) DEFAULT 'test'"
+                )
             post_columns = {
                 column["name"] for column in inspect(_engine).get_columns("rewritten_posts")
             }

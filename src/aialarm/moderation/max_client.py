@@ -229,3 +229,31 @@ def control_buttons(profile: str = "test") -> list:
             {"type": "callback", "text": main_label, "payload": "ctl:profile_main"},
         ],
     ]
+
+
+def district_control_buttons(profile: str = "test") -> list:
+    test_label = "🧪 Тест ✓" if profile == "test" else "🧪 Тест"
+    main_label = "🚀 Основной ✓" if profile == "main" else "🚀 Основной"
+    return [[
+        {"type": "callback", "text": test_label, "payload": "dctl:profile_test"},
+        {"type": "callback", "text": main_label, "payload": "dctl:profile_main"},
+    ]]
+
+
+def district_preview_buttons(post_id: int) -> list:
+    return [
+        [
+            {"type": "callback", "text": "✍️ Переписать", "payload": f"dpre:rewrite:{post_id}"},
+            {"type": "callback", "text": "🗑 Отменить", "payload": f"dpre:cancel:{post_id}"},
+        ]
+    ]
+
+
+def district_callback_buttons(post_id: int) -> list:
+    return [
+        [
+            {"type": "callback", "text": "✅ Опубликовать", "payload": f"dmod:approve:{post_id}"},
+            {"type": "callback", "text": "✏️ Править", "payload": f"dmod:edit:{post_id}"},
+        ],
+        [{"type": "callback", "text": "❌ Отклонить", "payload": f"dmod:reject:{post_id}"}],
+    ]

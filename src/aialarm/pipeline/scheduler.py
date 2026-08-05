@@ -20,6 +20,7 @@ from aialarm.control import get_pipeline_state, render_control_status
 from aialarm.filtering import run_filter_stage
 from aialarm.logging import configure_logging, get_logger
 from aialarm.moderation.service import route_previews
+from aialarm.moderation.districts import route_district_previews
 from aialarm.pipeline.runner import run_collection_sync
 from aialarm.publishers.service import run_publish_stage
 
@@ -45,6 +46,7 @@ def _processing_job() -> None:
         return
     run_filter_stage(collected_since=state.active_since)
     route_previews(collected_since=state.active_since)
+    route_district_previews(collected_since=state.active_since)
     cleanup_old(days=1)       # чистим старые скачанные картинки
 
 

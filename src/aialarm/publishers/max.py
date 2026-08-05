@@ -41,12 +41,12 @@ async def _load_bytes(ref: str) -> bytes | None:
 class MaxPublisher:
     platform = "max"
 
-    def __init__(self, profile: str | None = None):
+    def __init__(self, profile: str | None = None, chat_id: str | None = None):
         s = get_settings()
         self._profile = profile or get_publish_profile()
         channels = channels_for_profile(self._profile)
         self._token = s.secrets.max_bot_token
-        self._chat_id = channels.max
+        self._chat_id = chat_id or channels.max
         self._base = s.project.max_platform.base_url.rstrip("/")
         self._auth = s.project.max_platform.auth_header
 

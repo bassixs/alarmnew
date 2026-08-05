@@ -63,6 +63,7 @@ class PipelineControl(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     mode: Mapped[str] = mapped_column(String(16), default="auto")
     publish_profile: Mapped[str] = mapped_column(String(16), default="test")
+    district_publish_profile: Mapped[str] = mapped_column(String(16), default="test")
     override_started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -149,3 +150,25 @@ class Publication(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     post: Mapped[RewrittenPost] = relationship(back_populates="publications")
+
+
+class DistrictPost(Base):
+    """Районная карточка не вмешивается в основной калужский конвейер."""
+
+    __tablename__ = "district_posts"
+    __table_args__ = (UniqueConstraint("raw_id", "district_id", name="uq_district_post_raw_district"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    raw_id: Mapped[int] = mapped_column(ForeignKey("raw_news.id"), index=True)
+    district_id: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(24), default="preview", index=True)
+    post_text: Mapped[str] = mapped_column(Text, default="")
+    model: Mapped[str] = mapped_column(String(64), default="")
+    publish_profile: Mapped[str] = mapped_column(String(16), default="")
+    edited_by_moderator: Mapped[bool] = mapped_column(Boolean, default=False)
+    external_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    raw: Mapped[RawNews] = relationship()

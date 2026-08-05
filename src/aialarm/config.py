@@ -49,6 +49,7 @@ class SourceCfg(BaseModel):
     enabled: bool = True
     allow_visual: bool = True
     visual_warning: str = ""
+    district_id: str = ""  # для узкого районного источника
     extra: dict = Field(default_factory=dict)  # напр. {"selectors": {"body": "div.article"}}
 
 
@@ -68,11 +69,40 @@ class ChannelsCfg(ChannelProfileCfg):
     main: ChannelProfileCfg = Field(default_factory=ChannelProfileCfg)
 
 
+class DistrictCfg(BaseModel):
+    id: str
+    title: str
+    aliases: list[str] = Field(default_factory=list)
+    test_max: str = ""
+    main_max: str = ""
+    enabled: bool = True
+
+
+class DistrictsCfg(BaseModel):
+    enabled: bool = False
+    moderation_max_chat_id: str = ""
+    weekday_max_posts: int = 3
+    weekend_max_posts: int = 1
+    min_minutes_between_posts: int = 60
+    items: list[DistrictCfg] = Field(default_factory=list)
+
+
 def channels_for_profile(profile: str) -> ChannelProfileCfg:
     channels = get_settings().project.channels
     if profile == "main":
         return channels.main
     return channels.test if (channels.test.telegram or channels.test.max) else channels
+
+
+def district_for_id(district_id: str) -> DistrictCfg | None:
+    return next((item for item in get_settings().project.districts.items if item.id == district_id), None)
+
+
+def district_channel(district_id: str, profile: str) -> str:
+    district = district_for_id(district_id)
+    if not district:
+        return ""
+    return district.main_max if profile == "main" else district.test_max
 
 
 class FilterCfg(BaseModel):
@@ -136,6 +166,7 @@ class MaxPlatformCfg(BaseModel):
 class ProjectConfig(BaseModel):
     project_name: str = "aialarm"
     channels: ChannelsCfg = Field(default_factory=ChannelsCfg)
+    districts: DistrictsCfg = Field(default_factory=DistrictsCfg)
     sources: list[SourceCfg] = Field(default_factory=list)
     theses: list[str] = Field(default_factory=list)
     exclude_keywords: list[str] = Field(default_factory=list)

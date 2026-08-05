@@ -69,6 +69,46 @@ def test_telegram_source_label_has_no_username_prefix():
     assert _domain("https://t.me/Evgeniy_Serkin/123") == "Evgeniy Serkin"
 
 
+def test_district_detects_inflected_name_and_keeps_single_best_match():
+    from aialarm.config import DistrictCfg, DistrictsCfg, ProjectConfig, Settings, Secrets
+    from aialarm.moderation import districts
+
+    settings = Settings(
+        secrets=Secrets(),
+        project=ProjectConfig(
+            districts=DistrictsCfg(
+                enabled=True,
+                items=[
+                    DistrictCfg(id="lyudinovo", title="Людиново", aliases=["Людиновский"]),
+                    DistrictCfg(id="borovsk", title="Боровск", aliases=["Боровский"]),
+                ],
+            )
+        ),
+    )
+    raw = SimpleNamespace(
+        title="В Людиновском районе открыли ФАП",
+        body="Новый медпункт примет жителей.",
+        region="Калужская область",
+        source_url="https://example.test/news",
+    )
+    original_settings = districts.get_settings
+    try:
+        districts.get_settings = lambda: settings
+        assert districts.detect_district(raw) == "lyudinovo"
+    finally:
+        districts.get_settings = original_settings
+
+
+def test_district_cards_are_marked_and_target_one_channel():
+    from aialarm.moderation import max_client
+
+    preview = max_client.district_preview_buttons(12)
+    ready = max_client.district_callback_buttons(12)
+    assert preview[0][0]["payload"] == "dpre:rewrite:12"
+    assert ready[0][0]["payload"] == "dmod:approve:12"
+    assert all("approve_all" not in button["payload"] for row in ready for button in row)
+
+
 def test_max_edit_returns_to_publish_choice_without_autopublish():
     from aialarm.moderation import max_bot
 

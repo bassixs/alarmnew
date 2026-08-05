@@ -192,6 +192,47 @@ def set_publish_profile(profile: str) -> str:
     return profile
 
 
+def get_district_publish_profile() -> str:
+    """Районный тест/боевой контур независим от основного канала."""
+    with session_scope() as session:
+        row = session.get(PipelineControl, 1)
+        if row is None:
+            row = PipelineControl(id=1, district_publish_profile="test")
+            session.add(row)
+            session.flush()
+        profile = (row.district_publish_profile or "test").lower()
+        return profile if profile in {"test", "main"} else "test"
+
+
+def set_district_publish_profile(profile: str) -> str:
+    profile = profile.lower()
+    if profile not in {"test", "main"}:
+        raise ValueError(f"Неизвестный районный контур публикации: {profile}")
+    with session_scope() as session:
+        row = session.get(PipelineControl, 1)
+        if row is None:
+            row = PipelineControl(id=1)
+            session.add(row)
+        row.district_publish_profile = profile
+    return profile
+
+
+def render_district_control_status() -> str:
+    cfg = get_settings().project.districts
+    profile = get_district_publish_profile()
+    configured = sum(
+        1 for item in cfg.items if (item.main_max if profile == "main" else item.test_max)
+    )
+    return "\n".join(
+        [
+            "🏘 Районный контур",
+            f"Контур публикации: {'🚀 ОСНОВНОЙ' if profile == 'main' else '🧪 ТЕСТ'}",
+            f"Каналов в выбранном контуре: {configured}",
+            f"Лимит: {cfg.weekday_max_posts} в будни / {cfg.weekend_max_posts} в выходные на район",
+        ]
+    )
+
+
 def _local_hm(value: datetime | None, tz_name: str) -> str:
     if value is None:
         return "—"
