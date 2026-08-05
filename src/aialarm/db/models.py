@@ -7,11 +7,12 @@
 from __future__ import annotations
 
 import enum
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy import (
     JSON,
     Boolean,
+    Date,
     DateTime,
     Enum,
     Float,
@@ -182,3 +183,25 @@ class DistrictPost(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     raw: Mapped[RawNews] = relationship()
+
+
+class DistrictDailyControl(Base):
+    """Состояние района на конкретный московский календарный день.
+
+    После выполнения обычной дневной нормы поиск ставится на паузу. Модератор может
+    оставить её или продолжить поиск и публикации сверх нормы до конца дня.
+    """
+
+    __tablename__ = "district_daily_controls"
+    __table_args__ = (
+        UniqueConstraint("district_id", "local_date", name="uq_district_daily_control"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    district_id: Mapped[str] = mapped_column(String(64), index=True)
+    local_date: Mapped[date] = mapped_column(Date, index=True)
+    search_mode: Mapped[str] = mapped_column(String(16), default="paused")
+    quota_reached_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )

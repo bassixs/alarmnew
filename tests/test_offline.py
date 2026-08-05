@@ -118,6 +118,15 @@ def test_district_control_buttons_include_independent_schedule_controls():
     assert {"dctl:on", "dctl:off", "dctl:auto", "dctl:status"}.issubset(payloads)
 
 
+def test_district_quota_buttons_target_only_the_selected_district():
+    from aialarm.moderation import max_client
+
+    payloads = [
+        button["payload"] for row in max_client.district_quota_buttons("lyudinovo") for button in row
+    ]
+    assert payloads == ["dquota:stop:lyudinovo", "dquota:continue:lyudinovo"]
+
+
 def test_district_classifier_uses_local_selection_rules():
     from aialarm.filtering import llm_classifier
 

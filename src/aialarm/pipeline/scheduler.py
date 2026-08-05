@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 
-from aialarm.config import district_channel, get_settings
+from aialarm.config import get_settings
 from aialarm.control import (
     get_district_pipeline_state,
     get_district_publish_profile,
@@ -25,7 +25,7 @@ from aialarm.collectors.images import cleanup_old
 from aialarm.filtering import run_filter_stage
 from aialarm.logging import configure_logging, get_logger
 from aialarm.moderation.service import route_previews
-from aialarm.moderation.districts import route_district_previews
+from aialarm.moderation.districts import active_district_ids, route_district_previews
 from aialarm.pipeline.runner import run_collection_sync
 from aialarm.publishers.service import run_publish_stage
 
@@ -46,6 +46,7 @@ def _collection_job() -> None:
     now = datetime.now(timezone.utc)
     sources = get_settings().project.sources
     district_profile = get_district_publish_profile()
+    active_districts = active_district_ids(district_profile, now) if district_state.active else set()
     due = {
         source.url
         for source in sources
@@ -55,7 +56,7 @@ def _collection_job() -> None:
             or (
                 source.district_id
                 and district_state.active
-                and district_channel(source.district_id, district_profile)
+                and source.district_id in active_districts
             )
         )
         and (
@@ -87,8 +88,23 @@ def _processing_job() -> None:
         run_filter_stage(collected_since=state.active_since, district_only=False)
         route_previews(collected_since=state.active_since)
     if district_state.active:
-        run_filter_stage(collected_since=district_state.active_since, district_only=True)
-        route_district_previews(collected_since=district_state.active_since)
+        profile = get_district_publish_profile()
+        active_districts = active_district_ids(profile)
+        active_source_urls = {
+            source.url
+            for source in get_settings().project.sources
+            if source.enabled and source.district_id in active_districts
+        }
+        if active_source_urls:
+            run_filter_stage(
+                collected_since=district_state.active_since,
+                district_only=True,
+                source_urls=active_source_urls,
+            )
+            route_district_previews(
+                collected_since=district_state.active_since,
+                allowed_district_ids=active_districts,
+            )
     cleanup_old(days=1)       # чистим старые скачанные картинки
 
 

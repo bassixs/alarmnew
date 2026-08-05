@@ -250,6 +250,14 @@ def district_control_buttons(profile: str = "test") -> list:
     ]
 
 
+def district_quota_buttons(district_id: str) -> list:
+    """Решение после выполнения дневной нормы конкретного района."""
+    return [[
+        {"type": "callback", "text": "⏸ Остановить поиск", "payload": f"dquota:stop:{district_id}"},
+        {"type": "callback", "text": "▶️ Продолжить", "payload": f"dquota:continue:{district_id}"},
+    ]]
+
+
 def district_preview_buttons(post_id: int) -> list:
     return [
         [

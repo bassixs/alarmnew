@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 from aialarm.config import district_channel, district_for_id, get_settings
 from aialarm.control import get_district_publish_profile
 from aialarm.db import session_scope
-from aialarm.db.models import DistrictPost, FilteredNews, RawNews
+from aialarm.db.models import DistrictDailyControl, DistrictPost, FilteredNews, RawNews
 from aialarm.logging import get_logger
 from aialarm.media import raw_image_refs
 from aialarm.publishers.base import Post
@@ -75,12 +75,84 @@ def detect_district(raw: RawNews) -> str:
     return best_id
 
 
-def route_district_previews(limit: int = 80, collected_since: datetime | None = None) -> dict[str, int]:
+def _local_day(now: datetime | None = None) -> date:
+    return (now or datetime.now(timezone.utc)).astimezone(ZoneInfo("Europe/Moscow")).date()
+
+
+def _daily_control(
+    session, district_id: str, now: datetime | None = None
+) -> DistrictDailyControl | None:
+    return session.scalar(
+        select(DistrictDailyControl).where(
+            DistrictDailyControl.district_id == district_id,
+            DistrictDailyControl.local_date == _local_day(now),
+        )
+    )
+
+
+def current_district_post_limit(now: datetime | None = None) -> int:
+    now = now or datetime.now(timezone.utc)
+    cfg = get_settings().project.districts
+    return (
+        cfg.weekend_max_posts
+        if now.astimezone(ZoneInfo("Europe/Moscow")).weekday() >= 5
+        else cfg.weekday_max_posts
+    )
+
+
+def active_district_ids(profile: str | None = None, now: datetime | None = None) -> set[str]:
+    """Районы, для которых сегодня ещё нужно искать и обрабатывать новости."""
+    profile = profile or get_district_publish_profile()
+    candidates = {
+        item.id
+        for item in get_settings().project.districts.items
+        if item.enabled and district_channel(item.id, profile)
+    }
+    if not candidates:
+        return set()
+    with session_scope() as session:
+        paused = set(session.scalars(
+            select(DistrictDailyControl.district_id).where(
+                DistrictDailyControl.local_date == _local_day(now),
+                DistrictDailyControl.search_mode == "paused",
+                DistrictDailyControl.district_id.in_(candidates),
+            )
+        ))
+    return candidates - paused
+
+
+def set_district_search_mode(district_id: str, mode: str, now: datetime | None = None) -> bool:
+    """Остановить район до конца дня или разрешить работать сверх дневной нормы."""
+    if mode not in {"stop", "continue"} or not district_for_id(district_id):
+        return False
+    now = now or datetime.now(timezone.utc)
+    with session_scope() as session:
+        control = _daily_control(session, district_id, now)
+        if control is None:
+            control = DistrictDailyControl(
+                district_id=district_id,
+                local_date=_local_day(now),
+                quota_reached_at=now,
+            )
+            session.add(control)
+        control.search_mode = "continued" if mode == "continue" else "paused"
+        control.updated_at = now
+    return True
+
+
+def route_district_previews(
+    limit: int = 80,
+    collected_since: datetime | None = None,
+    allowed_district_ids: set[str] | None = None,
+) -> dict[str, int]:
     """Создать районные карточки независимо от статусов главного контура."""
     cfg = get_settings().project.districts
     if not cfg.enabled or not cfg.moderation_max_chat_id:
         return {"to_preview": 0, "unmatched": 0}
     profile = get_district_publish_profile()
+    allowed_district_ids = (
+        active_district_ids(profile) if allowed_district_ids is None else allowed_district_ids
+    )
     created: list[int] = []
     unmatched = 0
     with session_scope() as session:
@@ -90,7 +162,11 @@ def route_district_previews(limit: int = 80, collected_since: datetime | None = 
         rows = session.scalars(stmt.order_by(RawNews.collected_at.desc()).limit(limit)).all()
         for raw in rows:
             district_id = detect_district(raw)
-            if not district_id or not district_channel(district_id, profile):
+            if (
+                not district_id
+                or district_id not in allowed_district_ids
+                or not district_channel(district_id, profile)
+            ):
                 unmatched += 1
                 continue
             exists = session.scalar(
@@ -223,7 +299,7 @@ def publish_district_post(post_id: int) -> tuple[bool, str]:
             return False, "для района не настроен канал выбранного контура"
         now = datetime.now(timezone.utc)
         cfg = get_settings().project.districts
-        limit = cfg.weekend_max_posts if now.astimezone(ZoneInfo("Europe/Moscow")).weekday() >= 5 else cfg.weekday_max_posts
+        limit = current_district_post_limit(now)
         start = _day_start_utc(now)
         count = session.scalar(
             select(func.count(DistrictPost.id)).where(
@@ -232,8 +308,9 @@ def publish_district_post(post_id: int) -> tuple[bool, str]:
                 DistrictPost.published_at >= start,
             )
         ) or 0
-        if count >= limit:
-            return False, f"достигнут лимит района: {limit}"
+        control = _daily_control(session, post.district_id, now)
+        if count >= limit and (not control or control.search_mode != "continued"):
+            return False, f"дневная норма {limit} уже выполнена: поиск района остановлен"
         previous = session.scalar(
             select(func.max(DistrictPost.published_at)).where(
                 DistrictPost.district_id == post.district_id,
@@ -254,5 +331,15 @@ def publish_district_post(post_id: int) -> tuple[bool, str]:
         post.external_id = result.external_id
         post.published_at = now
         post.error = None
+        target_reached = count + 1 >= limit and control is None
+        if target_reached:
+            session.add(
+                DistrictDailyControl(
+                    district_id=post.district_id,
+                    local_date=_local_day(now),
+                    search_mode="paused",
+                    quota_reached_at=now,
+                )
+            )
         log.info("district_published", post_id=post_id, district=post.district_id, profile=profile)
-        return True, ""
+        return True, "daily_target_reached" if target_reached else ""

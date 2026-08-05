@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 import time
 
-from aialarm.config import get_settings
+from aialarm.config import district_for_id, get_settings
 from aialarm.control import (
     get_district_publish_profile,
     get_district_pipeline_state,
@@ -197,6 +197,52 @@ def _handle_district_control(
     _send_district_control_panel(message_id, notice)
 
 
+def _handle_district_quota(
+    action: str, district_id: str, user_id: int | None, callback_id: str, message_id: str
+) -> None:
+    if not _control_allowed(user_id):
+        max_client.answer_callback(callback_id, "Нет доступа к управлению")
+        return
+    if action not in {"stop", "continue"} or not districts.set_district_search_mode(
+        district_id, action
+    ):
+        max_client.answer_callback(callback_id, "Не удалось изменить поиск района")
+        return
+    district = district_for_id(district_id)
+    title = district.title if district else district_id
+    if action == "continue":
+        text = (
+            f"▶️ {title}: поиск продолжен до конца дня. "
+            "Можно публиковать новости сверх дневной нормы."
+        )
+        callback_text = "Поиск продолжен"
+    else:
+        text = f"⏸ {title}: поиск остановлен до конца дня."
+        callback_text = "Поиск остановлен"
+    max_client.answer_callback(callback_id, callback_text)
+    if message_id:
+        max_client.edit_message(message_id, text)
+
+
+def _send_district_quota_notice(district_id: str) -> None:
+    district = district_for_id(district_id)
+    if not district:
+        return
+    chat = get_settings().project.districts.moderation_max_chat_id
+    if not chat:
+        return
+    limit = districts.current_district_post_limit()
+    text = (
+        f"🏘 {district.title}: дневная норма выполнена — {limit} пост(а).\n\n"
+        "Поиск по району поставлен на паузу до конца дня. При необходимости "
+        "можно продолжить поиск и публиковать новости сверх нормы."
+    )
+    try:
+        max_client.send_message(chat, text, buttons=max_client.district_quota_buttons(district_id))
+    except Exception as exc:  # noqa: BLE001
+        log.error("district_quota_notice_failed", district=district_id, error=str(exc))
+
+
 def _handle_control(
     action: str,
     user_id: int | None,
@@ -245,6 +291,9 @@ def _handle_callback(update: dict) -> None:
         return
     if prefix == "dctl":
         _handle_district_control(action, user_id, cid, mid or "")
+        return
+    if prefix == "dquota":
+        _handle_district_quota(action, id_s, user_id, cid, mid or "")
         return
 
     # ── Районный контур: отдельные карточки и публикация ровно в один канал ──
@@ -378,6 +427,10 @@ def _publish_district_post(post_id: int, message_id: str) -> None:
     ok, reason = districts.publish_district_post(post_id)
     header = "✅ ОПУБЛИКОВАНО" if ok else f"⚠️ НЕ ОПУБЛИКОВАНО: {reason}"
     finalize_district_card(post_id, message_id, header)
+    if ok and reason == "daily_target_reached":
+        post = districts.get_district_pending(post_id)
+        if post:
+            _send_district_quota_notice(post["district_id"])
 
 
 def _reject_district_post(post_id: int, message_id: str) -> None:

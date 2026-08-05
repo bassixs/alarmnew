@@ -98,6 +98,7 @@ def run_filter_stage(
     limit: int = 50,
     collected_since: datetime | None = None,
     district_only: bool | None = None,
+    source_urls: set[str] | None = None,
 ) -> dict[str, int]:
     """Обработать все новости в статусе NEW."""
     stats = {"processed": 0, "relevant": 0, "filtered_out": 0, "excluded": 0}
@@ -105,6 +106,10 @@ def run_filter_stage(
         stmt = select(RawNews).where(RawNews.status == NewsStatus.NEW)
         if district_only is not None:
             stmt = stmt.where(RawNews.is_district_source.is_(district_only))
+        if source_urls is not None:
+            if not source_urls:
+                return stats
+            stmt = stmt.where(RawNews.source_url.in_(source_urls))
         if collected_since is not None:
             stmt = stmt.where(RawNews.collected_at >= collected_since)
         rows = session.scalars(stmt.limit(limit)).all()
