@@ -281,6 +281,9 @@ def set_district_publish_profile(profile: str) -> str:
 
 
 def render_district_control_status(state: EffectivePipelineState | None = None) -> str:
+    # Импорт здесь избегает циклической зависимости: районный модуль сам использует control.
+    from aialarm.moderation.districts import district_daily_summary
+
     state = state or get_district_pipeline_state()
     project = get_settings().project
     cfg = project.districts
@@ -290,24 +293,34 @@ def render_district_control_status(state: EffectivePipelineState | None = None) 
     configured = sum(
         1 for item in cfg.items if (item.main_max if profile == "main" else item.test_max)
     )
-    return "\n".join(
-        [
-            f"🏘 Районный помощник: {'ВКЛЮЧЁН' if state.active else 'ВЫКЛЮЧЕН'}",
-            f"Режим: {mode_names.get(state.mode, state.mode)}",
-            f"Часовой пояс: {state.timezone_name}",
-            f"Будни: {schedule.weekday_start}–{schedule.weekday_end}",
-            f"Выходные: {schedule.weekend_start}–{schedule.weekend_end}",
-            f"Контур публикации: {'🚀 ОСНОВНОЙ' if profile == 'main' else '🧪 ТЕСТ'}",
-            f"Каналов в выбранном контуре: {configured}",
-            f"Лимит: {cfg.weekday_max_posts} в будни / {cfg.weekend_max_posts} в выходные на район",
-        ]
-    ) + (
-        f"\nРучной режим до: {_local_hm(state.override_until, state.timezone_name)}"
-        if state.override_until
-        else f"\nСледующее переключение: {_local_hm(state.next_transition, state.timezone_name)}"
-        if state.next_transition
-        else ""
-    )
+    lines = [
+        f"🏘 Районный помощник: {'ВКЛЮЧЁН' if state.active else 'ВЫКЛЮЧЕН'}",
+        f"Режим: {mode_names.get(state.mode, state.mode)}",
+        f"Часовой пояс: {state.timezone_name}",
+        f"Будни: {schedule.weekday_start}–{schedule.weekday_end}",
+        f"Выходные: {schedule.weekend_start}–{schedule.weekend_end}",
+        f"Контур публикации: {'🚀 ОСНОВНОЙ' if profile == 'main' else '🧪 ТЕСТ'}",
+        f"Каналов в выбранном контуре: {configured}",
+        f"Лимит: {cfg.weekday_max_posts} в будни / {cfg.weekend_max_posts} в выходные на район",
+    ]
+    if state.override_until:
+        lines.append(f"Ручной режим до: {_local_hm(state.override_until, state.timezone_name)}")
+    elif state.next_transition:
+        lines.append(f"Следующее переключение: {_local_hm(state.next_transition, state.timezone_name)}")
+
+    summary = district_daily_summary(profile)
+    if summary:
+        mode_labels = {
+            "active": "поиск идёт",
+            "paused": "поиск на паузе",
+            "continued": "поиск продолжен",
+        }
+        lines.append("Публикации сегодня:")
+        lines.extend(
+            f"• {item['title']} — {item['published']}/{item['limit']} ({mode_labels[item['search_mode']]})"
+            for item in summary
+        )
+    return "\n".join(lines)
 
 
 def _local_hm(value: datetime | None, tz_name: str) -> str:

@@ -100,6 +100,54 @@ def current_district_post_limit(now: datetime | None = None) -> int:
     )
 
 
+def district_daily_summary(
+    profile: str | None = None, now: datetime | None = None
+) -> list[dict[str, str | int]]:
+    """Сводка публикаций и режима поиска по районам за текущий московский день."""
+    now = now or datetime.now(timezone.utc)
+    profile = profile or get_district_publish_profile()
+    items = [
+        item
+        for item in get_settings().project.districts.items
+        if item.enabled and district_channel(item.id, profile)
+    ]
+    if not items:
+        return []
+    ids = {item.id for item in items}
+    with session_scope() as session:
+        counts = dict(
+            session.execute(
+                select(DistrictPost.district_id, func.count(DistrictPost.id))
+                .where(
+                    DistrictPost.district_id.in_(ids),
+                    DistrictPost.status == "published",
+                    DistrictPost.published_at >= _day_start_utc(now),
+                )
+                .group_by(DistrictPost.district_id)
+            ).all()
+        )
+        controls = {
+            control.district_id: control.search_mode
+            for control in session.scalars(
+                select(DistrictDailyControl).where(
+                    DistrictDailyControl.district_id.in_(ids),
+                    DistrictDailyControl.local_date == _local_day(now),
+                )
+            )
+        }
+    limit = current_district_post_limit(now)
+    return [
+        {
+            "id": item.id,
+            "title": item.title,
+            "published": int(counts.get(item.id, 0)),
+            "limit": limit,
+            "search_mode": controls.get(item.id, "active"),
+        }
+        for item in items
+    ]
+
+
 def active_district_ids(profile: str | None = None, now: datetime | None = None) -> set[str]:
     """Районы, для которых сегодня ещё нужно искать и обрабатывать новости."""
     profile = profile or get_district_publish_profile()
