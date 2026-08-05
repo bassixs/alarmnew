@@ -38,6 +38,7 @@ def _in_collection_window(published_at: datetime | None, since: datetime | None)
 
 async def run_collection(
     only_source_url: str | None = None,
+    source_urls: set[str] | None = None,
     published_since: datetime | None = None,
 ) -> dict[str, int]:
     """Собрать со всех включённых источников. Скачиваем каналы параллельно, но пишем в БД
@@ -45,7 +46,9 @@ async def run_collection(
     sources = get_settings().project.sources
     active = [
         s for s in sources
-        if s.enabled and (only_source_url is None or s.url == only_source_url)
+        if s.enabled
+        and (only_source_url is None or s.url == only_source_url)
+        and (source_urls is None or s.url in source_urls)
     ]
     fetched = await asyncio.gather(*[_fetch_source(s) for s in active])
     inserted = 0
@@ -73,9 +76,10 @@ async def run_collection(
 
 def run_collection_sync(
     only_source_url: str | None = None,
+    source_urls: set[str] | None = None,
     published_since: datetime | None = None,
 ) -> dict[str, int]:
-    return asyncio.run(run_collection(only_source_url, published_since))
+    return asyncio.run(run_collection(only_source_url, source_urls, published_since))
 
 
 def run_processing() -> dict[str, dict]:

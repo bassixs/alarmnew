@@ -29,6 +29,7 @@ log = get_logger(__name__)
 PROCESS_INTERVAL_MIN = 5
 _last_active: bool | None = None
 _last_scheduled_active: bool | None = None
+_source_last_collected: dict[str, datetime] = {}
 
 
 def _collection_job() -> None:
@@ -36,7 +37,24 @@ def _collection_job() -> None:
     if not state.active:
         log.info("collection_skipped_outside_duty", mode=state.mode)
         return
-    run_collection_sync(published_since=state.active_since)
+    now = datetime.now(timezone.utc)
+    sources = get_settings().project.sources
+    due = {
+        source.url
+        for source in sources
+        if source.enabled
+        and (
+            source.url not in _source_last_collected
+            or now - _source_last_collected[source.url]
+            >= timedelta(minutes=max(1, source.poll_interval_min))
+        )
+    }
+    if not due:
+        return
+    run_collection_sync(source_urls=due, published_since=state.active_since)
+    # Ошибочный источник не должен мгновенно забивать лог повторными запросами.
+    for source_url in due:
+        _source_last_collected[source_url] = now
 
 
 def _processing_job() -> None:
