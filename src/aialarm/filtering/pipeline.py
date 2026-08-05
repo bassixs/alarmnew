@@ -11,15 +11,24 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from aialarm.config import get_settings
+from aialarm.config import district_for_id, get_settings
 from aialarm.db import session_scope
 from aialarm.db.models import FilteredNews, NewsStatus, RawNews
 from aialarm.filtering.llm_classifier import classify
 from aialarm.filtering.prefilter import prefilter_score
 from aialarm.filtering.rules import check_rules
 from aialarm.logging import get_logger
+from aialarm.source_policy import source_matches
 
 log = get_logger(__name__)
+
+
+def _district_title(raw: RawNews) -> str:
+    for source in get_settings().project.sources:
+        if source.district_id and source_matches(source.url, raw.source_url):
+            district = district_for_id(source.district_id)
+            return district.title if district else source.district_id
+    return ""
 
 
 def filter_one(session: Session, raw: RawNews) -> FilteredNews:
@@ -40,7 +49,7 @@ def filter_one(session: Session, raw: RawNews) -> FilteredNews:
         matched = "(prefilter)"
         reason = f"semantic score={score:.2f}"
     elif fcfg.strategy == "llm_only" or (fcfg.strategy == "prefilter_then_llm" and prefilter_passed):
-        res = classify(raw.title, raw.body)
+        res = classify(raw.title, raw.body, district_title=_district_title(raw))
         relevant, matched, confidence, reason = (
             res.relevant, res.matched_thesis, res.confidence, res.reason,
         )

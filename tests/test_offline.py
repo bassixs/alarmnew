@@ -109,6 +109,34 @@ def test_district_cards_are_marked_and_target_one_channel():
     assert all("approve_all" not in button["payload"] for row in ready for button in row)
 
 
+def test_district_classifier_uses_local_selection_rules():
+    from aialarm.filtering import llm_classifier
+
+    captured: dict = {}
+
+    class FakeClient:
+        def structured(self, **kwargs):
+            captured.update(kwargs)
+            return {"relevant": True, "matched_thesis": "местная новость", "confidence": 70, "reason": "тест"}
+
+    settings = SimpleNamespace(
+        project=SimpleNamespace(
+            theses=["полезные новости"],
+            tone_of_voice="нейтральный",
+            llm=SimpleNamespace(classify_model="test-model"),
+        )
+    )
+    old_settings, old_client = llm_classifier.get_settings, llm_classifier.get_llm_client
+    try:
+        llm_classifier.get_settings = lambda: settings
+        llm_classifier.get_llm_client = lambda: FakeClient()
+        llm_classifier.classify("Пейзаж Тарусы", "Описание", district_title="Таруса")
+        assert "отдельная лента для жителей Таруса" in captured["system"]
+        assert "обычный ежедневный прогноз не бери" in captured["system"]
+    finally:
+        llm_classifier.get_settings, llm_classifier.get_llm_client = old_settings, old_client
+
+
 def test_max_edit_returns_to_publish_choice_without_autopublish():
     from aialarm.moderation import max_bot
 
