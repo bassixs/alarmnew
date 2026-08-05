@@ -10,7 +10,8 @@ import asyncio
 from datetime import datetime, timezone
 
 from aialarm.collectors import build_collector, store_items
-from aialarm.config import SourceCfg, get_settings
+from aialarm.config import SourceCfg, district_channel, get_settings
+from aialarm.control import get_district_publish_profile
 from aialarm.filtering import run_filter_stage
 from aialarm.logging import get_logger
 from aialarm.moderation.service import route_previews
@@ -44,11 +45,15 @@ async def run_collection(
     """Собрать со всех включённых источников. Скачиваем каналы параллельно, но пишем в БД
     ПОСЛЕДОВАТЕЛЬНО — иначе параллельные записи в SQLite дают 'database is locked'."""
     sources = get_settings().project.sources
+    district_profile = get_district_publish_profile()
     active = [
         s for s in sources
         if s.enabled
         and (only_source_url is None or s.url == only_source_url)
         and (source_urls is None or s.url in source_urls)
+        # Районные источники включаются только вместе с назначенным каналом
+        # выбранного контура: не расходуем API/ИИ до подключения района.
+        and (not s.district_id or bool(district_channel(s.district_id, district_profile)))
     ]
     fetched = await asyncio.gather(*[_fetch_source(s) for s in active])
     inserted = 0

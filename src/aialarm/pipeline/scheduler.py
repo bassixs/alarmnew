@@ -13,7 +13,8 @@ from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 
-from aialarm.config import get_settings
+from aialarm.config import district_channel, get_settings
+from aialarm.control import get_district_publish_profile
 from aialarm.db import init_db
 from aialarm.collectors.images import cleanup_old
 from aialarm.control import get_pipeline_state, render_control_status
@@ -39,10 +40,12 @@ def _collection_job() -> None:
         return
     now = datetime.now(timezone.utc)
     sources = get_settings().project.sources
+    district_profile = get_district_publish_profile()
     due = {
         source.url
         for source in sources
         if source.enabled
+        and (not source.district_id or district_channel(source.district_id, district_profile))
         and (
             source.url not in _source_last_collected
             or now - _source_last_collected[source.url]
