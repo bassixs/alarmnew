@@ -345,6 +345,13 @@ def _day_start_utc(now: datetime) -> datetime:
     return datetime.combine(local.date(), time.min, tzinfo=local.tzinfo).astimezone(timezone.utc)
 
 
+def _as_utc(value: datetime) -> datetime:
+    """SQLite может вернуть timezone=True значение без tzinfo."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def publish_district_post(
     post_id: int, selected_targets: list[str] | None = None
 ) -> tuple[bool, str]:
@@ -391,7 +398,7 @@ def publish_district_post(
                 DistrictPost.id != post.id,
             )
         )
-        if previous and now - previous < timedelta(minutes=cfg.min_minutes_between_posts):
+        if previous and now - _as_utc(previous) < timedelta(minutes=cfg.min_minutes_between_posts):
             return False, "не выдержан интервал между постами этого района"
         post.publish_profile = profile
         # Районный пост не должен удерживать десяток оригиналов в RAM: одного фото

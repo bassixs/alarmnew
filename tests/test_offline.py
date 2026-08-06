@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from aialarm.collectors.base import make_dedup_key
@@ -92,6 +93,13 @@ def test_source_link_is_clickable_for_each_platform():
     url = "https://t.me/example/123"
     assert render_source_link(url, "markdown") == "[Источник](https://t.me/example/123)"
     assert render_source_link(url, "html") == '<a href="https://t.me/example/123">Источник</a>'
+
+
+def test_district_publish_interval_accepts_sqlite_naive_datetime():
+    from aialarm.moderation.districts import _as_utc
+
+    naive = datetime(2026, 8, 6, 11, 0)
+    assert _as_utc(naive) == datetime(2026, 8, 6, 11, 0, tzinfo=timezone.utc)
 
 
 def test_district_detects_inflected_name_and_keeps_single_best_match():
