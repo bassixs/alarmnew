@@ -34,6 +34,13 @@ districts:
       main_max: ""
       test_telegram: ""
       main_telegram: ""
+      # Только Telegram: отдельный районный подвал, строки из кликабельных ссылок.
+      # MAX-посты районов всегда выходят без подвала.
+      telegram_footer:
+        - - text: "Подписаться"
+            url: "https://t.me/example"
+          - text: "✉️ Предложить новость"
+            url: "https://t.me/exampleBot"
 
 sources:
   - type: rss             # rss | telegram | scrape | aggregator

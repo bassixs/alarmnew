@@ -69,6 +69,23 @@ def test_telegram_source_label_has_no_username_prefix():
     assert _domain("https://t.me/Evgeniy_Serkin/123") == "Evgeniy Serkin"
 
 
+def test_district_footer_is_telegram_only_and_has_clickable_links():
+    from aialarm.config import FooterItem
+    from aialarm.publishers.footer import render_footer_rows
+
+    rows = [[
+        FooterItem(text="Подписаться", url="https://t.me/example"),
+        FooterItem(text="📩 Написать нам", url="https://t.me/exampleBot"),
+    ]]
+    assert render_footer_rows(rows, "markdown") == (
+        "[Подписаться](https://t.me/example) [📩 Написать нам](https://t.me/exampleBot)"
+    )
+    assert render_footer_rows(rows, "html") == (
+        '<a href="https://t.me/example">Подписаться</a> '
+        '<a href="https://t.me/exampleBot">📩 Написать нам</a>'
+    )
+
+
 def test_district_detects_inflected_name_and_keeps_single_best_match():
     from aialarm.config import DistrictCfg, DistrictsCfg, ProjectConfig, Settings, Secrets
     from aialarm.moderation import districts

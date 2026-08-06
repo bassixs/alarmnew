@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import html
 
-from aialarm.config import get_settings
+from aialarm.config import FooterItem, get_settings
 
 
-def render_footer(platform: str, fmt: str) -> str:
-    rows = get_settings().project.publish.footers.get(platform, [])
+def render_footer_rows(rows: list[list[FooterItem]], fmt: str) -> str:
+    """Отрисовать заранее выбранный набор строк подвала."""
     lines: list[str] = []
     for row in rows:
         parts = []
@@ -26,3 +26,7 @@ def render_footer(platform: str, fmt: str) -> str:
                 parts.append(html.escape(item.text) if fmt == "html" else item.text)
         lines.append(" ".join(parts))
     return "\n".join(lines).strip()
+
+
+def render_footer(platform: str, fmt: str) -> str:
+    return render_footer_rows(get_settings().project.publish.footers.get(platform, []), fmt)

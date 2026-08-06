@@ -69,6 +69,11 @@ class ChannelsCfg(ChannelProfileCfg):
     main: ChannelProfileCfg = Field(default_factory=ChannelProfileCfg)
 
 
+class FooterItem(BaseModel):
+    text: str
+    url: str = ""
+
+
 class DistrictCfg(BaseModel):
     id: str
     title: str
@@ -77,6 +82,8 @@ class DistrictCfg(BaseModel):
     main_max: str = ""
     test_telegram: str = ""
     main_telegram: str = ""
+    # Районный подвал Telegram. Для MAX районные посты всегда без подвала.
+    telegram_footer: list[list[FooterItem]] = Field(default_factory=list)
     enabled: bool = True
 
 
@@ -117,6 +124,11 @@ def district_telegram_channel(district_id: str, profile: str) -> str:
     return district.main_telegram if profile == "main" else district.test_telegram
 
 
+def district_telegram_footer(district_id: str) -> list[list[FooterItem]]:
+    district = district_for_id(district_id)
+    return district.telegram_footer if district else []
+
+
 class FilterCfg(BaseModel):
     strategy: str = "prefilter_then_llm"
     embed_relevance_min: float = 0.35
@@ -144,11 +156,6 @@ class DutyScheduleCfg(BaseModel):
     weekday_end: str = "23:00"
     weekend_start: str = "09:00"
     weekend_end: str = "23:00"
-
-
-class FooterItem(BaseModel):
-    text: str
-    url: str = ""
 
 
 class PublishCfg(BaseModel):

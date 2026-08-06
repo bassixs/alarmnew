@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from aialarm.config import (
     district_channel,
     district_for_id,
+    district_telegram_footer,
     district_telegram_channel,
     get_settings,
 )
@@ -396,14 +397,20 @@ def publish_district_post(
         delivered = dict(post.publication_results or {})
         errors: list[str] = []
         if "max" in targets and "max" not in delivered:
-            result = asyncio.run(MaxPublisher(profile=profile, chat_id=max_channel).publish(material))
+            result = asyncio.run(
+                MaxPublisher(profile=profile, chat_id=max_channel, footer_rows=[]).publish(material)
+            )
             if result.ok:
                 delivered["max"] = result.external_id or "ok"
             else:
                 errors.append(f"MAX: {result.error or 'не принял публикацию'}")
         if "telegram" in targets and "telegram" not in delivered:
             result = asyncio.run(
-                TelegramPublisher(profile=profile, chat_id=telegram_channel).publish(material)
+                TelegramPublisher(
+                    profile=profile,
+                    chat_id=telegram_channel,
+                    footer_rows=district_telegram_footer(post.district_id),
+                ).publish(material)
             )
             if result.ok:
                 delivered["telegram"] = result.external_id or "ok"

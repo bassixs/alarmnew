@@ -16,11 +16,11 @@ from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramRetryAfter, TelegramAPIError
 from aiogram.types import BufferedInputFile, InputMediaPhoto
 
-from aialarm.config import channels_for_profile, get_settings
+from aialarm.config import FooterItem, channels_for_profile, get_settings
 from aialarm.control import get_publish_profile
 from aialarm.logging import get_logger
 from aialarm.publishers.base import Post, PublishResult
-from aialarm.publishers.footer import render_footer
+from aialarm.publishers.footer import render_footer, render_footer_rows
 
 log = get_logger(__name__)
 
@@ -43,21 +43,31 @@ async def _image_bytes(ref: str) -> bytes | None:
         return None
 
 
-def _html_body(post: Post, limit: int) -> str:
+def _html_body(post: Post, limit: int, footer_rows: list[list[FooterItem]] | None = None) -> str:
     body = html.escape(post.rendered_text(limit))
-    footer = render_footer("telegram", "html")
+    footer = (
+        render_footer_rows(footer_rows, "html")
+        if footer_rows is not None
+        else render_footer("telegram", "html")
+    )
     return f"{body}\n\n{footer}" if footer else body
 
 
 class TelegramPublisher:
     platform = "telegram"
 
-    def __init__(self, profile: str | None = None, chat_id: str | None = None):
+    def __init__(
+        self,
+        profile: str | None = None,
+        chat_id: str | None = None,
+        footer_rows: list[list[FooterItem]] | None = None,
+    ):
         s = get_settings()
         self._profile = profile or get_publish_profile()
         channels = channels_for_profile(self._profile)
         self._token = s.secrets.telegram_bot_token
         self._chat_id = chat_id or channels.telegram
+        self._footer_rows = footer_rows
 
     async def publish(self, post: Post) -> PublishResult:
         if not self._token or not self._chat_id:
@@ -71,7 +81,7 @@ class TelegramPublisher:
                 if image:
                     images.append(image)
 
-            text = _html_body(post, _TEXT_LIMIT - 300)
+            text = _html_body(post, _TEXT_LIMIT - 300, self._footer_rows)
             caption = text if len(text) <= _CAPTION_LIMIT else None
             if len(images) == 1:
                 msg = await bot.send_photo(

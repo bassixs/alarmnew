@@ -12,12 +12,12 @@ from pathlib import Path
 
 import httpx
 
-from aialarm.config import channels_for_profile, get_settings
+from aialarm.config import FooterItem, channels_for_profile, get_settings
 from aialarm.control import get_publish_profile
 from aialarm.logging import get_logger
 from aialarm.media import MAX_IMAGES_PER_POST
 from aialarm.publishers.base import Post, PublishResult
-from aialarm.publishers.footer import render_footer
+from aialarm.publishers.footer import render_footer, render_footer_rows
 
 log = get_logger(__name__)
 
@@ -41,12 +41,18 @@ async def _load_bytes(ref: str) -> bytes | None:
 class MaxPublisher:
     platform = "max"
 
-    def __init__(self, profile: str | None = None, chat_id: str | None = None):
+    def __init__(
+        self,
+        profile: str | None = None,
+        chat_id: str | None = None,
+        footer_rows: list[list[FooterItem]] | None = None,
+    ):
         s = get_settings()
         self._profile = profile or get_publish_profile()
         channels = channels_for_profile(self._profile)
         self._token = s.secrets.max_bot_token
         self._chat_id = chat_id or channels.max
+        self._footer_rows = footer_rows
         self._base = s.project.max_platform.base_url.rstrip("/")
         self._auth = s.project.max_platform.auth_header
 
@@ -77,7 +83,11 @@ class MaxPublisher:
 
     def _text(self, post: Post) -> str:
         body = post.rendered_text(_TEXT_LIMIT)
-        footer = render_footer("max", "markdown")
+        footer = (
+            render_footer_rows(self._footer_rows, "markdown")
+            if self._footer_rows is not None
+            else render_footer("max", "markdown")
+        )
         return f"{body}\n\n{footer}" if footer else body
 
     async def publish(self, post: Post) -> PublishResult:
