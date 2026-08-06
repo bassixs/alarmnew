@@ -86,6 +86,14 @@ def test_district_footer_is_telegram_only_and_has_clickable_links():
     )
 
 
+def test_source_link_is_clickable_for_each_platform():
+    from aialarm.publishers.footer import render_source_link
+
+    url = "https://t.me/example/123"
+    assert render_source_link(url, "markdown") == "[Источник](https://t.me/example/123)"
+    assert render_source_link(url, "html") == '<a href="https://t.me/example/123">Источник</a>'
+
+
 def test_district_detects_inflected_name_and_keeps_single_best_match():
     from aialarm.config import DistrictCfg, DistrictsCfg, ProjectConfig, Settings, Secrets
     from aialarm.moderation import districts

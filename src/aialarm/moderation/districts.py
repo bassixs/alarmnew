@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -22,7 +23,7 @@ from aialarm.media import raw_image_refs
 from aialarm.publishers.base import Post
 from aialarm.publishers.max import MaxPublisher
 from aialarm.publishers.telegram import TelegramPublisher
-from aialarm.rewrite.rewriter import _SCHEMA, _attribution, _build_system
+from aialarm.rewrite.rewriter import _SCHEMA, _build_system
 from aialarm.llm.client import get_llm_client
 from aialarm.source_policy import source_matches, visual_policy
 
@@ -51,6 +52,8 @@ _DISTRICT_REWRITE_APPENDIX = """
   расписания, благоустройство) выбирай практичную суть: что произошло и кого это касается.
 - Не преувеличивай масштаб районной новости и не делай её похожей на официальный пресс-релиз.
 """
+
+_LEGACY_SOURCE_LINE = re.compile(r"^— источник:\\s*.+$", re.IGNORECASE)
 
 
 def _source_district(raw: RawNews) -> str:
@@ -309,8 +312,8 @@ def rewrite_district_post(post_id: int) -> bool:
             temperature=llm.temperature,
         )
         text = str(data.get("post_text", "")).strip()
-        attribution = _attribution(post.raw.source_url, bool(raw_image_refs(post.raw)))
-        post.post_text = f"{text}\n\n{attribution}" if attribution else text
+        # Источник добавляется при публикации: кликабельной ссылкой и всегда, даже без фото.
+        post.post_text = text
         post.model = llm.rewrite_model
         post.status = "moderation"
         log.info("district_rewritten", post_id=post_id, district=post.district_id)
@@ -393,7 +396,17 @@ def publish_district_post(
         post.publish_profile = profile
         # Районный пост не должен удерживать десяток оригиналов в RAM: одного фото
         # достаточно для карточки и публикации.
-        material = Post(text=post.post_text, image_urls=raw_image_refs(post.raw)[:1])
+        # Карточки, переписанные до появления кликабельного источника, могли содержать
+        # старую текстовую подпись «— источник: ...». Убираем только её, не трогая текст
+        # модератора, и выводим единый кликабельный вариант ниже.
+        publish_text = "\n".join(
+            line for line in post.post_text.splitlines() if not _LEGACY_SOURCE_LINE.match(line.strip())
+        ).strip()
+        material = Post(
+            text=publish_text,
+            source_url=post.raw.source_url,
+            image_urls=raw_image_refs(post.raw)[:1],
+        )
         delivered = dict(post.publication_results or {})
         errors: list[str] = []
         if "max" in targets and "max" not in delivered:

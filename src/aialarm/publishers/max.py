@@ -17,7 +17,7 @@ from aialarm.control import get_publish_profile
 from aialarm.logging import get_logger
 from aialarm.media import MAX_IMAGES_PER_POST
 from aialarm.publishers.base import Post, PublishResult
-from aialarm.publishers.footer import render_footer, render_footer_rows
+from aialarm.publishers.footer import render_footer, render_footer_rows, render_source_link
 
 log = get_logger(__name__)
 
@@ -88,7 +88,9 @@ class MaxPublisher:
             if self._footer_rows is not None
             else render_footer("max", "markdown")
         )
-        return f"{body}\n\n{footer}" if footer else body
+        source = render_source_link(post.source_url, "markdown")
+        parts = [body, source, footer]
+        return "\n\n".join(part for part in parts if part)
 
     async def publish(self, post: Post) -> PublishResult:
         if not self._token or not self._chat_id:

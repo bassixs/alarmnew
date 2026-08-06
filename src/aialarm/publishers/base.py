@@ -12,6 +12,7 @@ from typing import Protocol
 @dataclass(slots=True)
 class Post:
     text: str
+    source_url: str | None = None
     image_url: str | None = None
     image_urls: list[str] = field(default_factory=list)
     hashtags: list[str] = field(default_factory=list)

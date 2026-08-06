@@ -20,7 +20,7 @@ from aialarm.config import FooterItem, channels_for_profile, get_settings
 from aialarm.control import get_publish_profile
 from aialarm.logging import get_logger
 from aialarm.publishers.base import Post, PublishResult
-from aialarm.publishers.footer import render_footer, render_footer_rows
+from aialarm.publishers.footer import render_footer, render_footer_rows, render_source_link
 
 log = get_logger(__name__)
 
@@ -50,7 +50,8 @@ def _html_body(post: Post, limit: int, footer_rows: list[list[FooterItem]] | Non
         if footer_rows is not None
         else render_footer("telegram", "html")
     )
-    return f"{body}\n\n{footer}" if footer else body
+    source = render_source_link(post.source_url, "html")
+    return "\n\n".join(part for part in (body, source, footer) if part)
 
 
 class TelegramPublisher:

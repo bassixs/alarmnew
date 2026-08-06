@@ -30,3 +30,14 @@ def render_footer_rows(rows: list[list[FooterItem]], fmt: str) -> str:
 
 def render_footer(platform: str, fmt: str) -> str:
     return render_footer_rows(get_settings().project.publish.footers.get(platform, []), fmt)
+
+
+def render_source_link(source_url: str | None, fmt: str) -> str:
+    """Короткая кликабельная строка об источнике для согласованных постов."""
+    if not source_url:
+        return ""
+    if fmt == "html":
+        return f'<a href="{html.escape(source_url, quote=True)}">Источник</a>'
+    if fmt == "markdown":
+        return f"[Источник]({source_url})"
+    return "Источник"
