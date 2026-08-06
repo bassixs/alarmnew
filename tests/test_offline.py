@@ -102,6 +102,15 @@ def test_district_publish_interval_accepts_sqlite_naive_datetime():
     assert _as_utc(naive) == datetime(2026, 8, 6, 11, 0, tzinfo=timezone.utc)
 
 
+def test_district_card_warns_when_source_visual_is_forbidden():
+    from aialarm.moderation.notify import _district_prefix
+
+    text = _district_prefix(
+        {"district_title": "Таруса", "visual_warning": "у источника запрещён визуал"}
+    )
+    assert "🚫 ВИЗУАЛ БРАТЬ НЕЛЬЗЯ: у источника запрещён визуал" in text
+
+
 def test_district_detects_inflected_name_and_keeps_single_best_match():
     from aialarm.config import DistrictCfg, DistrictsCfg, ProjectConfig, Settings, Secrets
     from aialarm.moderation import districts

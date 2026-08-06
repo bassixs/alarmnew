@@ -214,7 +214,8 @@ def send_preview(raw_id: int) -> None:
 # ── Районные карточки в отдельном MAX-чате ───────────────────────────────────
 def _district_prefix(p: dict, original: bool = False) -> str:
     state = "❗ ОРИГИНАЛ (не переписан)" if original else "🏘 ГОТОВЫЙ ПОСТ"
-    return f"{state}\n📍 РАЙОН: {p['district_title']}\n{'─' * 20}\n"
+    visual = f"🚫 ВИЗУАЛ БРАТЬ НЕЛЬЗЯ: {p['visual_warning']}\n" if p.get("visual_warning") else ""
+    return f"{state}\n📍 РАЙОН: {p['district_title']}\n{visual}{'─' * 20}\n"
 
 
 def _district_preview_text(p: dict) -> str:
