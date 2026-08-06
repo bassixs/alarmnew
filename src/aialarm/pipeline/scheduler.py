@@ -90,16 +90,10 @@ def _processing_job() -> None:
     if district_state.active:
         profile = get_district_publish_profile()
         active_districts = active_district_ids(profile)
-        active_source_urls = {
-            source.url
-            for source in get_settings().project.sources
-            if source.enabled and source.district_id in active_districts
-        }
-        if active_source_urls:
+        if active_districts:
             run_filter_stage(
                 collected_since=district_state.active_since,
                 district_only=True,
-                source_urls=active_source_urls,
             )
             route_district_previews(
                 collected_since=district_state.active_since,
