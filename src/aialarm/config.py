@@ -95,7 +95,8 @@ class DistrictsCfg(BaseModel):
     daily_end: str = "21:00"
     weekday_max_posts: int = 3
     weekend_max_posts: int = 1
-    min_minutes_between_posts: int = 60
+    # 0 — без паузы: редактор сам определяет порядок согласованных районных постов.
+    min_minutes_between_posts: int = 0
     items: list[DistrictCfg] = Field(default_factory=list)
 
 

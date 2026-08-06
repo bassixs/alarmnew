@@ -102,6 +102,12 @@ def test_district_publish_interval_accepts_sqlite_naive_datetime():
     assert _as_utc(naive) == datetime(2026, 8, 6, 11, 0, tzinfo=timezone.utc)
 
 
+def test_districts_have_no_default_publish_interval():
+    from aialarm.config import DistrictsCfg
+
+    assert DistrictsCfg().min_minutes_between_posts == 0
+
+
 def test_district_card_warns_when_source_visual_is_forbidden():
     from aialarm.moderation.notify import _district_prefix
 

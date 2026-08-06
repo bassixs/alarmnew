@@ -25,7 +25,7 @@ districts:
   daily_end: "21:00"
   weekday_max_posts: 3
   weekend_max_posts: 1
-  min_minutes_between_posts: 60
+  min_minutes_between_posts: 0  # 0 — публиковать районные новости без паузы между ними
   items:
     - id: "lyudinovo"
       title: "Людиново"
