@@ -17,7 +17,7 @@ from aialarm.config import (
 )
 from aialarm.control import get_district_publish_profile
 from aialarm.db import session_scope
-from aialarm.db.models import DistrictDailyControl, DistrictPost, FilteredNews, RawNews
+from aialarm.db.models import DistrictDailyControl, DistrictPost, FilteredNews, NewsStatus, RawNews
 from aialarm.logging import get_logger
 from aialarm.media import raw_image_refs
 from aialarm.publishers.base import Post
@@ -326,6 +326,9 @@ def cancel_district_post(post_id: int) -> bool:
         if not post or post.status in {"published", "rejected"}:
             return False
         post.status = "rejected"
+        if post.raw:
+            # После завершения смены изображение отклонённой карточки можно безопасно убрать.
+            post.raw.status = NewsStatus.REJECTED
         return True
 
 
@@ -444,6 +447,9 @@ def publish_district_post(
             post.error = "; ".join(errors)
             return False, post.error
         post.status = "published"
+        # Районный RawNews иначе остаётся RELEVANT навсегда и удерживает локальное фото.
+        # Финально опубликованная карточка больше не нуждается в кэше изображения.
+        post.raw.status = NewsStatus.PUBLISHED
         post.external_id = delivered.get("max") or delivered.get("telegram")
         post.published_at = now
         post.error = None

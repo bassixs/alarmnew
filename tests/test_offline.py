@@ -108,6 +108,13 @@ def test_districts_have_no_default_publish_interval():
     assert DistrictsCfg().min_minutes_between_posts == 0
 
 
+def test_district_schedule_cleanup_only_runs_on_scheduled_shift_end():
+    from aialarm.pipeline import scheduler
+
+    assert scheduler._is_schedule_transition(True, True, False, False)
+    assert not scheduler._is_schedule_transition(True, True, False, True)
+
+
 def test_district_card_warns_when_source_visual_is_forbidden():
     from aialarm.moderation.notify import _district_prefix
 

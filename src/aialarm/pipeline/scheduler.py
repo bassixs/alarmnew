@@ -34,6 +34,8 @@ log = get_logger(__name__)
 PROCESS_INTERVAL_MIN = 5
 _last_active: bool | None = None
 _last_scheduled_active: bool | None = None
+_last_district_active: bool | None = None
+_last_district_scheduled_active: bool | None = None
 _source_last_collected: dict[str, datetime] = {}
 
 
@@ -132,6 +134,16 @@ def _notify_control_transition(active: bool) -> None:
         log.warning("control_transition_notify_failed", error=str(e))
 
 
+def _cleanup_after_shift() -> None:
+    """Освободить кэш завершённых постов после закрытия смены.
+
+    cleanup_old сохраняет всё, что ещё требует решения модератора, поэтому фото
+    карточек из очереди не пропадут до следующего рабочего дня.
+    """
+    removed = cleanup_old(days=0)
+    log.info("shift_media_cleanup", removed=removed)
+
+
 def _is_schedule_transition(
     previous_active: bool,
     previous_scheduled_active: bool,
@@ -144,10 +156,14 @@ def _is_schedule_transition(
 
 def _control_tick() -> None:
     global _last_active, _last_scheduled_active
+    global _last_district_active, _last_district_scheduled_active
     state = get_pipeline_state()
+    district_state = get_district_pipeline_state()
     if _last_active is None or _last_scheduled_active is None:
         _last_active = state.active
         _last_scheduled_active = state.scheduled_active
+        _last_district_active = district_state.active
+        _last_district_scheduled_active = district_state.scheduled_active
         log.info("duty_state_initialized", active=state.active, mode=state.mode)
         return
 
@@ -164,8 +180,26 @@ def _control_tick() -> None:
         log.info("duty_state_changed", active=state.active, mode=state.mode)
         if schedule_changed:
             _notify_control_transition(state.active)
+            if not state.active:
+                _cleanup_after_shift()
         if state.active:
             # Не ждём до 20 минут после включения: сразу собираем свежие публикации.
+            _collection_job()
+
+    district_active_changed = district_state.active != _last_district_active
+    district_schedule_changed = _is_schedule_transition(
+        bool(_last_district_active),
+        bool(_last_district_scheduled_active),
+        district_state.active,
+        district_state.scheduled_active,
+    )
+    _last_district_active = district_state.active
+    _last_district_scheduled_active = district_state.scheduled_active
+    if district_active_changed:
+        log.info("district_duty_state_changed", active=district_state.active, mode=district_state.mode)
+        if district_schedule_changed and not district_state.active:
+            _cleanup_after_shift()
+        if district_state.active:
             _collection_job()
 
 
