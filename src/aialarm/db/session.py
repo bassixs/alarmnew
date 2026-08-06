@@ -79,6 +79,13 @@ def init_db() -> None:
                 connection.exec_driver_sql(
                     "ALTER TABLE rewritten_posts ADD COLUMN publish_profile VARCHAR(16) DEFAULT ''"
                 )
+            district_post_columns = {
+                column["name"] for column in inspect(_engine).get_columns("district_posts")
+            }
+            if "publication_results" not in district_post_columns:
+                connection.exec_driver_sql(
+                    "ALTER TABLE district_posts ADD COLUMN publication_results JSON"
+                )
 
 
 def get_session() -> Session:

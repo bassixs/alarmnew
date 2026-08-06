@@ -32,6 +32,8 @@ districts:
       aliases: ["Людиново", "Людиновский"]
       test_max: ""
       main_max: ""
+      test_telegram: ""
+      main_telegram: ""
 
 sources:
   - type: rss             # rss | telegram | scrape | aggregator

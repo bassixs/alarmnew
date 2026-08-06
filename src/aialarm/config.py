@@ -75,6 +75,8 @@ class DistrictCfg(BaseModel):
     aliases: list[str] = Field(default_factory=list)
     test_max: str = ""
     main_max: str = ""
+    test_telegram: str = ""
+    main_telegram: str = ""
     enabled: bool = True
 
 
@@ -106,6 +108,13 @@ def district_channel(district_id: str, profile: str) -> str:
     if not district:
         return ""
     return district.main_max if profile == "main" else district.test_max
+
+
+def district_telegram_channel(district_id: str, profile: str) -> str:
+    district = district_for_id(district_id)
+    if not district:
+        return ""
+    return district.main_telegram if profile == "main" else district.test_telegram
 
 
 class FilterCfg(BaseModel):

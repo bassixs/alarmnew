@@ -99,14 +99,15 @@ def test_district_detects_inflected_name_and_keeps_single_best_match():
         districts.get_settings = original_settings
 
 
-def test_district_cards_are_marked_and_target_one_channel():
+def test_district_cards_are_marked_and_offer_max_or_max_plus_telegram():
     from aialarm.moderation import max_client
 
     preview = max_client.district_preview_buttons(12)
     ready = max_client.district_callback_buttons(12)
     assert preview[0][0]["payload"] == "dpre:rewrite:12"
-    assert ready[0][0]["payload"] == "dmod:approve:12"
-    assert all("approve_all" not in button["payload"] for row in ready for button in row)
+    payloads = [button["payload"] for row in ready for button in row]
+    assert "dmod:approve_max:12" in payloads
+    assert "dmod:approve_all:12" in payloads
 
 
 def test_district_control_buttons_include_independent_schedule_controls():

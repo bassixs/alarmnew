@@ -7,7 +7,12 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 
-from aialarm.config import district_channel, district_for_id, get_settings
+from aialarm.config import (
+    district_channel,
+    district_for_id,
+    district_telegram_channel,
+    get_settings,
+)
 from aialarm.control import get_district_publish_profile
 from aialarm.db import session_scope
 from aialarm.db.models import DistrictDailyControl, DistrictPost, FilteredNews, RawNews
@@ -15,6 +20,7 @@ from aialarm.logging import get_logger
 from aialarm.media import raw_image_refs
 from aialarm.publishers.base import Post
 from aialarm.publishers.max import MaxPublisher
+from aialarm.publishers.telegram import TelegramPublisher
 from aialarm.rewrite.rewriter import _SCHEMA, _attribution, _build_system
 from aialarm.llm.client import get_llm_client
 from aialarm.source_policy import source_matches, visual_policy
@@ -120,7 +126,7 @@ def district_daily_summary(
                 select(DistrictPost.district_id, func.count(DistrictPost.id))
                 .where(
                     DistrictPost.district_id.in_(ids),
-                    DistrictPost.status == "published",
+                    DistrictPost.status.in_(("published", "partial")),
                     DistrictPost.published_at >= _day_start_utc(now),
                 )
                 .group_by(DistrictPost.district_id)
@@ -335,16 +341,30 @@ def _day_start_utc(now: datetime) -> datetime:
     return datetime.combine(local.date(), time.min, tzinfo=local.tzinfo).astimezone(timezone.utc)
 
 
-def publish_district_post(post_id: int) -> tuple[bool, str]:
-    """Опубликовать строго в один районный MAX-канал с независимой квотой."""
+def publish_district_post(
+    post_id: int, selected_targets: list[str] | None = None
+) -> tuple[bool, str]:
+    """Опубликовать районный пост в MAX либо одновременно в MAX и Telegram.
+
+    Успешная площадка сохраняется отдельно в JSON, поэтому повтор после частичного
+    сбоя отправит пост только туда, куда он ещё не дошёл.
+    """
+    targets = list(dict.fromkeys(selected_targets or ["max"]))
+    if not targets or any(target not in {"max", "telegram"} for target in targets):
+        return False, "неверно выбраны площадки"
+    if "max" not in targets:
+        return False, "районный пост должен публиковаться в MAX"
     with session_scope() as session:
         post = session.get(DistrictPost, post_id)
-        if not post or not post.raw or post.status != "moderation":
+        if not post or not post.raw or post.status not in {"moderation", "partial"}:
             return False, "карточка уже обработана"
         profile = post.publish_profile or get_district_publish_profile()
-        channel = district_channel(post.district_id, profile)
-        if not channel:
-            return False, "для района не настроен канал выбранного контура"
+        max_channel = district_channel(post.district_id, profile)
+        telegram_channel = district_telegram_channel(post.district_id, profile)
+        if not max_channel:
+            return False, "для района не настроен MAX-канал выбранного контура"
+        if "telegram" in targets and not telegram_channel:
+            return False, "для района не настроен Telegram-канал выбранного контура"
         now = datetime.now(timezone.utc)
         cfg = get_settings().project.districts
         limit = current_district_post_limit(now)
@@ -352,7 +372,8 @@ def publish_district_post(post_id: int) -> tuple[bool, str]:
         count = session.scalar(
             select(func.count(DistrictPost.id)).where(
                 DistrictPost.district_id == post.district_id,
-                DistrictPost.status == "published",
+                DistrictPost.status.in_(("published", "partial")),
+                DistrictPost.id != post.id,
                 DistrictPost.published_at >= start,
             )
         ) or 0
@@ -362,7 +383,8 @@ def publish_district_post(post_id: int) -> tuple[bool, str]:
         previous = session.scalar(
             select(func.max(DistrictPost.published_at)).where(
                 DistrictPost.district_id == post.district_id,
-                DistrictPost.status == "published",
+                DistrictPost.status.in_(("published", "partial")),
+                DistrictPost.id != post.id,
             )
         )
         if previous and now - previous < timedelta(minutes=cfg.min_minutes_between_posts):
@@ -371,12 +393,31 @@ def publish_district_post(post_id: int) -> tuple[bool, str]:
         # Районный пост не должен удерживать десяток оригиналов в RAM: одного фото
         # достаточно для карточки и публикации.
         material = Post(text=post.post_text, image_urls=raw_image_refs(post.raw)[:1])
-        result = asyncio.run(MaxPublisher(profile=profile, chat_id=channel).publish(material))
-        if not result.ok:
-            post.error = result.error
-            return False, result.error or "MAX не принял публикацию"
+        delivered = dict(post.publication_results or {})
+        errors: list[str] = []
+        if "max" in targets and "max" not in delivered:
+            result = asyncio.run(MaxPublisher(profile=profile, chat_id=max_channel).publish(material))
+            if result.ok:
+                delivered["max"] = result.external_id or "ok"
+            else:
+                errors.append(f"MAX: {result.error or 'не принял публикацию'}")
+        if "telegram" in targets and "telegram" not in delivered:
+            result = asyncio.run(
+                TelegramPublisher(profile=profile, chat_id=telegram_channel).publish(material)
+            )
+            if result.ok:
+                delivered["telegram"] = result.external_id or "ok"
+            else:
+                errors.append(f"Telegram: {result.error or 'не принял публикацию'}")
+        post.publication_results = delivered
+        if errors:
+            post.status = "partial" if delivered else "moderation"
+            post.published_at = now if delivered else None
+            post.external_id = delivered.get("max") or delivered.get("telegram")
+            post.error = "; ".join(errors)
+            return False, post.error
         post.status = "published"
-        post.external_id = result.external_id
+        post.external_id = delivered.get("max") or delivered.get("telegram")
         post.published_at = now
         post.error = None
         target_reached = count + 1 >= limit and control is None

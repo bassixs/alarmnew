@@ -246,14 +246,17 @@ def send_district_preview(post_id: int) -> None:
     )
 
 
-def edit_district_card(post_id: int, message_id: str) -> bool:
+def edit_district_card(post_id: int, message_id: str, notice: str = "") -> bool:
     from aialarm.moderation import max_client
 
     p = get_district_pending(post_id)
     if not p or not message_id:
         return False
+    text = _district_card_text(p)
+    if notice:
+        text = f"{notice}\n{'─' * 20}\n{text}"
     return max_client.edit_message(
-        message_id, _district_card_text(p), buttons=max_client.district_callback_buttons(post_id),
+        message_id, text, buttons=max_client.district_callback_buttons(post_id),
         image_refs=(p.get("image_urls") or [])[:1],
     )
 

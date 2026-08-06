@@ -270,8 +270,11 @@ def district_preview_buttons(post_id: int) -> list:
 def district_callback_buttons(post_id: int) -> list:
     return [
         [
-            {"type": "callback", "text": "✅ Опубликовать", "payload": f"dmod:approve:{post_id}"},
-            {"type": "callback", "text": "✏️ Править", "payload": f"dmod:edit:{post_id}"},
+            {"type": "callback", "text": "MAX", "payload": f"dmod:approve_max:{post_id}"},
+            {"type": "callback", "text": "MAX + ТГ", "payload": f"dmod:approve_all:{post_id}"},
         ],
-        [{"type": "callback", "text": "❌ Отклонить", "payload": f"dmod:reject:{post_id}"}],
+        [
+            {"type": "callback", "text": "✏️ Править", "payload": f"dmod:edit:{post_id}"},
+            {"type": "callback", "text": "❌ Отклонить", "payload": f"dmod:reject:{post_id}"},
+        ],
     ]

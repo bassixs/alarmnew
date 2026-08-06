@@ -314,12 +314,17 @@ def _handle_callback(update: dict) -> None:
         return
 
     if prefix == "dmod" and obj_id is not None:
-        if action == "approve":
+        if action in {"approve", "approve_max", "approve_all"}:
             if not get_district_pipeline_state().active:
                 max_client.answer_callback(cid, "Районный помощник сейчас вне смены")
                 return
+            selected_targets = ["max"] if action in {"approve", "approve_max"} else ["max", "telegram"]
+            confirmation = "⏳ Публикую в MAX…" if selected_targets == ["max"] else "⏳ Публикую в MAX и ТГ…"
             if not _submit_district_action(
-                obj_id, lambda: _publish_district_post(obj_id, mid or ""), cid, "⏳ Публикую в районный канал…"
+                obj_id,
+                lambda: _publish_district_post(obj_id, mid or "", selected_targets),
+                cid,
+                confirmation,
             ):
                 max_client.answer_callback(cid, "⏳ Уже публикую…")
         elif action == "reject":
@@ -423,10 +428,16 @@ def _cancel_district_post(post_id: int, message_id: str) -> None:
         max_client.delete_message(message_id)
 
 
-def _publish_district_post(post_id: int, message_id: str) -> None:
-    ok, reason = districts.publish_district_post(post_id)
-    header = "✅ ОПУБЛИКОВАНО" if ok else f"⚠️ НЕ ОПУБЛИКОВАНО: {reason}"
-    finalize_district_card(post_id, message_id, header)
+def _publish_district_post(
+    post_id: int, message_id: str, selected_targets: list[str]
+) -> None:
+    ok, reason = districts.publish_district_post(post_id, selected_targets)
+    if ok:
+        finalize_district_card(post_id, message_id, "✅ ОПУБЛИКОВАНО")
+    else:
+        # Кнопки остаются: если одна площадка временно недоступна, повтор уйдёт
+        # только на неё и не создаст дубль на уже успешной.
+        edit_district_card(post_id, message_id, f"⚠️ НЕ ОПУБЛИКОВАНО: {reason}")
     if ok and reason == "daily_target_reached":
         post = districts.get_district_pending(post_id)
         if post:

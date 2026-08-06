@@ -52,12 +52,12 @@ def _html_body(post: Post, limit: int) -> str:
 class TelegramPublisher:
     platform = "telegram"
 
-    def __init__(self, profile: str | None = None):
+    def __init__(self, profile: str | None = None, chat_id: str | None = None):
         s = get_settings()
         self._profile = profile or get_publish_profile()
         channels = channels_for_profile(self._profile)
         self._token = s.secrets.telegram_bot_token
-        self._chat_id = channels.telegram
+        self._chat_id = chat_id or channels.telegram
 
     async def publish(self, post: Post) -> PublishResult:
         if not self._token or not self._chat_id:

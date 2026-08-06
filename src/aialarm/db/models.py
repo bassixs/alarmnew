@@ -178,6 +178,8 @@ class DistrictPost(Base):
     publish_profile: Mapped[str] = mapped_column(String(16), default="")
     edited_by_moderator: Mapped[bool] = mapped_column(Boolean, default=False)
     external_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Успешные доставки по площадкам; нужны для безопасного повтора после частичного сбоя.
+    publication_results: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
