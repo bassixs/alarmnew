@@ -241,7 +241,7 @@ def district_control_buttons(profile: str = "test") -> list:
         ],
         [
             {"type": "callback", "text": "🕒 AUTO", "payload": "dctl:auto"},
-            {"type": "callback", "text": "📊 Статус", "payload": "dctl:status"},
+            {"type": "callback", "text": "📊 Статистика", "payload": "dctl:statistics"},
         ],
         [
             {"type": "callback", "text": test_label, "payload": "dctl:profile_test"},

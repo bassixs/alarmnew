@@ -280,7 +280,9 @@ def set_district_publish_profile(profile: str) -> str:
     return profile
 
 
-def render_district_control_status(state: EffectivePipelineState | None = None) -> str:
+def render_district_control_status(
+    state: EffectivePipelineState | None = None, *, include_summary: bool = True
+) -> str:
     # Импорт здесь избегает циклической зависимости: районный модуль сам использует control.
     from aialarm.moderation.districts import district_daily_summary
 
@@ -308,18 +310,27 @@ def render_district_control_status(state: EffectivePipelineState | None = None) 
     elif state.next_transition:
         lines.append(f"Следующее переключение: {_local_hm(state.next_transition, state.timezone_name)}")
 
+    if include_summary:
+        lines.extend(render_district_daily_statistics(profile).splitlines())
+    return "\n".join(lines)
+
+
+def render_district_daily_statistics(profile: str | None = None) -> str:
+    """Отдельная сводка по районам — не раздувает стартовую панель /bot."""
+    profile = profile or get_district_publish_profile()
     summary = district_daily_summary(profile)
-    if summary:
-        mode_labels = {
-            "active": "поиск идёт",
-            "paused": "поиск на паузе",
-            "continued": "поиск продолжен",
-        }
-        lines.append("Публикации сегодня:")
-        lines.extend(
-            f"• {item['title']} — {item['published']}/{item['limit']} ({mode_labels[item['search_mode']]})"
-            for item in summary
-        )
+    if not summary:
+        return "📊 Публикации сегодня: районов в контуре нет"
+    mode_labels = {
+        "active": "поиск идёт",
+        "paused": "поиск на паузе",
+        "continued": "поиск продолжен",
+    }
+    lines = ["📊 Публикации сегодня:"]
+    lines.extend(
+        f"• {item['title']} — {item['published']}/{item['limit']} ({mode_labels[item['search_mode']]})"
+        for item in summary
+    )
     return "\n".join(lines)
 
 

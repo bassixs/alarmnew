@@ -19,6 +19,7 @@ from aialarm.control import (
     get_district_publish_profile,
     get_pipeline_state,
     render_control_status,
+    render_district_control_status,
 )
 from aialarm.db import init_db
 from aialarm.collectors.images import cleanup_old
@@ -134,6 +135,29 @@ def _notify_control_transition(active: bool) -> None:
         log.warning("control_transition_notify_failed", error=str(e))
 
 
+def _notify_district_control_transition(active: bool) -> None:
+    """Сообщить в отдельный районный чат о границе его собственной смены."""
+    try:
+        from aialarm.moderation import max_client
+
+        chat_id = get_settings().project.districts.moderation_max_chat_id
+        if not chat_id:
+            return
+        prefix = (
+            "🟢 Районная смена началась\n\n"
+            "🔎 Ищу свежие новости по районам. Карточки появятся, когда найдутся подходящие поводы.\n\n"
+            if active
+            else "⚪ Районная смена завершена\n\n"
+        )
+        max_client.send_message(
+            chat_id,
+            prefix + render_district_control_status(include_summary=False),
+            buttons=max_client.district_control_buttons(get_district_publish_profile()),
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning("district_control_transition_notify_failed", error=str(e))
+
+
 def _cleanup_after_shift() -> None:
     """Освободить кэш завершённых постов после закрытия смены.
 
@@ -197,8 +221,10 @@ def _control_tick() -> None:
     _last_district_scheduled_active = district_state.scheduled_active
     if district_active_changed:
         log.info("district_duty_state_changed", active=district_state.active, mode=district_state.mode)
-        if district_schedule_changed and not district_state.active:
-            _cleanup_after_shift()
+        if district_schedule_changed:
+            _notify_district_control_transition(district_state.active)
+            if not district_state.active:
+                _cleanup_after_shift()
         if district_state.active:
             _collection_job()
 

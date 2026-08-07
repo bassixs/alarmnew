@@ -171,7 +171,7 @@ def test_district_control_buttons_include_independent_schedule_controls():
     payloads = [
         button["payload"] for row in max_client.district_control_buttons() for button in row
     ]
-    assert {"dctl:on", "dctl:off", "dctl:auto", "dctl:status"}.issubset(payloads)
+    assert {"dctl:on", "dctl:off", "dctl:auto", "dctl:statistics"}.issubset(payloads)
 
 
 def test_district_quota_buttons_target_only_the_selected_district():

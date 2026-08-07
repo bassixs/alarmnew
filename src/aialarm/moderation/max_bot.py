@@ -26,6 +26,7 @@ from aialarm.control import (
     get_pipeline_state,
     get_publish_profile,
     render_control_status,
+    render_district_daily_statistics,
     render_district_control_status,
     set_control_mode,
     set_district_publish_profile,
@@ -151,7 +152,7 @@ def _send_control_panel(message_id: str = "", notice: str = "") -> None:
 
 
 def _send_district_control_panel(message_id: str = "", notice: str = "") -> None:
-    text = render_district_control_status()
+    text = render_district_control_status(include_summary=False)
     if notice:
         text = f"{notice}\n\n{text}"
     buttons = max_client.district_control_buttons(get_district_publish_profile())
@@ -160,6 +161,12 @@ def _send_district_control_panel(message_id: str = "", notice: str = "") -> None
     chat = get_settings().project.districts.moderation_max_chat_id
     if chat:
         max_client.send_message(chat, text, buttons=buttons)
+
+
+def _send_district_statistics() -> None:
+    chat = get_settings().project.districts.moderation_max_chat_id
+    if chat:
+        max_client.send_message(chat, render_district_daily_statistics())
 
 
 def _handle_district_control(
@@ -189,7 +196,11 @@ def _handle_district_control(
         profile = set_district_publish_profile("test" if action == "profile_test" else "main")
         max_client.answer_callback(callback_id, "Тестовый контур" if profile == "test" else "Основной контур")
         notice = "🧪 Выбран тестовый контур" if profile == "test" else "🚀 Выбран основной контур"
-    elif action == "status":
+    elif action == "statistics":
+        max_client.answer_callback(callback_id, "Статистика отправлена отдельным сообщением")
+        _send_district_statistics()
+        return
+    elif action == "status":  # совместимость со старыми кнопками в чате
         max_client.answer_callback(callback_id, "Статус обновлён")
         notice = ""
     else:
