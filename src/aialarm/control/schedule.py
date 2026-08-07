@@ -317,6 +317,8 @@ def render_district_control_status(
 
 def render_district_daily_statistics(profile: str | None = None) -> str:
     """Отдельная сводка по районам — не раздувает стартовую панель /bot."""
+    from aialarm.moderation.districts import district_daily_summary
+
     profile = profile or get_district_publish_profile()
     summary = district_daily_summary(profile)
     if not summary:
