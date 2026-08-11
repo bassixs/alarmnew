@@ -108,6 +108,21 @@ def test_districts_have_no_default_publish_interval():
     assert DistrictsCfg().min_minutes_between_posts == 0
 
 
+def test_district_publish_profile_is_selected_at_first_delivery():
+    from types import SimpleNamespace
+    from aialarm.moderation import districts
+
+    original = districts.get_district_publish_profile
+    try:
+        districts.get_district_publish_profile = lambda: "main"
+        assert districts._delivery_profile(SimpleNamespace(publication_results={}, publish_profile="test")) == "main"
+        assert districts._delivery_profile(
+            SimpleNamespace(publication_results={"max": "123"}, publish_profile="test")
+        ) == "test"
+    finally:
+        districts.get_district_publish_profile = original
+
+
 def test_district_schedule_cleanup_only_runs_on_scheduled_shift_end():
     from aialarm.pipeline import scheduler
 

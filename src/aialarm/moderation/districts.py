@@ -238,7 +238,6 @@ def route_district_previews(
                 raw_id=raw.id,
                 district_id=district_id,
                 status="preview",
-                publish_profile=profile,
             )
             session.add(candidate)
             session.flush()
@@ -355,6 +354,18 @@ def _as_utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
+def _delivery_profile(post: DistrictPost) -> str:
+    """Выбрать контур в момент первой доставки.
+
+    Карточка может ждать модератора после переключения тест/основной, поэтому до
+    первой успешной отправки используем текущий выбранный контур. При частичном
+    успехе фиксируем прежний контур: повтор не должен внезапно уйти в другие каналы.
+    """
+    if post.publication_results:
+        return post.publish_profile or get_district_publish_profile()
+    return get_district_publish_profile()
+
+
 def publish_district_post(
     post_id: int, selected_targets: list[str] | None = None
 ) -> tuple[bool, str]:
@@ -372,7 +383,7 @@ def publish_district_post(
         post = session.get(DistrictPost, post_id)
         if not post or not post.raw or post.status not in {"moderation", "partial"}:
             return False, "карточка уже обработана"
-        profile = post.publish_profile or get_district_publish_profile()
+        profile = _delivery_profile(post)
         max_channel = district_channel(post.district_id, profile)
         telegram_channel = district_telegram_channel(post.district_id, profile)
         if not max_channel:
