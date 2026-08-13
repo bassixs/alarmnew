@@ -58,6 +58,13 @@ def test_post_render_omits_hashtags_and_respects_limit():
     assert len(Post(text="a" * 100).rendered_text(10)) == 10
 
 
+def test_telegram_network_retry_configuration_is_bounded():
+    from aialarm.publishers.telegram import _NETWORK_RETRY_DELAYS_SEC, _NETWORK_SEND_ATTEMPTS
+
+    assert _NETWORK_SEND_ATTEMPTS == 3
+    assert len(_NETWORK_RETRY_DELAYS_SEC) == _NETWORK_SEND_ATTEMPTS - 1
+
+
 def test_source_matches_telegram_post_url():
     assert source_matches("Evgeniy_Serkin", "https://t.me/Evgeniy_Serkin/123")
     assert source_matches("https://t.me/s/Evgeniy_Serkin", "https://t.me/Evgeniy_Serkin/456")

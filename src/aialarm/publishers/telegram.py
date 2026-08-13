@@ -7,13 +7,15 @@
 """
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+import asyncio
 import html
 from pathlib import Path
 
 import httpx
 from aiogram import Bot
 from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramRetryAfter, TelegramAPIError
+from aiogram.exceptions import TelegramAPIError, TelegramNetworkError, TelegramRetryAfter
 from aiogram.types import BufferedInputFile, InputMediaPhoto
 
 from aialarm.config import FooterItem, channels_for_profile, get_settings
@@ -26,6 +28,8 @@ log = get_logger(__name__)
 
 _TEXT_LIMIT = 4096
 _CAPTION_LIMIT = 1024
+_NETWORK_SEND_ATTEMPTS = 3
+_NETWORK_RETRY_DELAYS_SEC = (1, 3)
 
 
 async def _image_bytes(ref: str) -> bytes | None:
@@ -52,6 +56,29 @@ def _html_body(post: Post, limit: int, footer_rows: list[list[FooterItem]] | Non
     )
     source = render_source_link(post.source_url, "html")
     return "\n\n".join(part for part in (body, source, footer) if part)
+
+
+async def _send_with_network_retry(operation: Callable[[], Awaitable]):  # noqa: ANN201
+    """Повторить только кратковременную сетевую ошибку Telegram.
+
+    Это не повторяет ошибки прав, разметки и лимитов. После ограниченного числа
+    попыток ошибка уходит в карточку модерации для безопасного ручного повтора.
+    """
+    for attempt in range(1, _NETWORK_SEND_ATTEMPTS + 1):
+        try:
+            return await operation()
+        except TelegramNetworkError as error:
+            if attempt == _NETWORK_SEND_ATTEMPTS:
+                raise
+            delay = _NETWORK_RETRY_DELAYS_SEC[attempt - 1]
+            log.warning(
+                "tg_publish_network_retry",
+                attempt=attempt,
+                total=_NETWORK_SEND_ATTEMPTS,
+                delay_sec=delay,
+                error=str(error),
+            )
+            await asyncio.sleep(delay)
 
 
 class TelegramPublisher:
@@ -85,45 +112,59 @@ class TelegramPublisher:
             text = _html_body(post, _TEXT_LIMIT - 300, self._footer_rows)
             caption = text if len(text) <= _CAPTION_LIMIT else None
             if len(images) == 1:
-                msg = await bot.send_photo(
-                    self._chat_id,
-                    photo=BufferedInputFile(images[0], filename="image-01.jpg"),
-                    caption=caption,
-                    parse_mode=ParseMode.HTML if caption else None,
+                msg = await _send_with_network_retry(
+                    lambda: bot.send_photo(
+                        self._chat_id,
+                        photo=BufferedInputFile(images[0], filename="image-01.jpg"),
+                        caption=caption,
+                        parse_mode=ParseMode.HTML if caption else None,
+                    )
                 )
             elif len(images) > 1:
-                media = [
-                    InputMediaPhoto(
-                        media=BufferedInputFile(image, filename=f"image-{index + 1:02d}.jpg"),
-                        caption=caption if index == 0 else None,
-                        parse_mode=ParseMode.HTML if index == 0 and caption else None,
-                    )
-                    for index, image in enumerate(images)
-                ]
-                messages = await bot.send_media_group(self._chat_id, media=media)
+                def send_album():
+                    # BufferedInputFile создаём заново для каждой попытки: aiohttp может
+                    # уже прочитать поток первого запроса до сетевого таймаута.
+                    media = [
+                        InputMediaPhoto(
+                            media=BufferedInputFile(image, filename=f"image-{index + 1:02d}.jpg"),
+                            caption=caption if index == 0 else None,
+                            parse_mode=ParseMode.HTML if index == 0 and caption else None,
+                        )
+                        for index, image in enumerate(images)
+                    ]
+                    return bot.send_media_group(self._chat_id, media=media)
+
+                messages = await _send_with_network_retry(send_album)
                 msg = messages[0]
             else:
-                msg = await bot.send_message(
-                    self._chat_id,
-                    text,
-                    parse_mode=ParseMode.HTML,
-                    disable_web_page_preview=True,
+                msg = await _send_with_network_retry(
+                    lambda: bot.send_message(
+                        self._chat_id,
+                        text,
+                        parse_mode=ParseMode.HTML,
+                        disable_web_page_preview=True,
+                    )
                 )
 
             # Caption альбома ограничен 1024 символами. Длинный текст отправляем следом,
             # не обрезая его и не выбрасывая фотографии.
             if images and caption is None:
-                msg = await bot.send_message(
-                    self._chat_id,
-                    text,
-                    parse_mode=ParseMode.HTML,
-                    disable_web_page_preview=True,
+                msg = await _send_with_network_retry(
+                    lambda: bot.send_message(
+                        self._chat_id,
+                        text,
+                        parse_mode=ParseMode.HTML,
+                        disable_web_page_preview=True,
+                    )
                 )
             return PublishResult(ok=True, external_id=str(msg.message_id))
         except TelegramRetryAfter as e:
             log.warning("tg_rate_limited", retry_after=e.retry_after)
             return PublishResult(ok=False, error=f"rate limited: retry after {e.retry_after}s",
                                  rate_limited=True)
+        except TelegramNetworkError as e:
+            log.error("tg_publish_network_failed", attempts=_NETWORK_SEND_ATTEMPTS, error=str(e))
+            return PublishResult(ok=False, error=str(e))
         except TelegramAPIError as e:
             log.error("tg_publish_failed", error=str(e))
             return PublishResult(ok=False, error=str(e))
