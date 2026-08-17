@@ -232,11 +232,11 @@ def test_visual_choices_keep_editor_in_control_and_mark_recommendation():
     assert by_payload["mod:generate:55"].endswith("✓")
 
 
-def test_visual_style_prompt_requires_ai_label_and_no_other_text():
+def test_visual_style_prompt_forbids_text_and_server_keeps_ai_label():
     from aialarm.visuals import AI_LABEL, _STYLE_PROMPT
 
-    assert AI_LABEL in _STYLE_PROMPT
-    assert "Другого текста" in _STYLE_PROMPT
+    assert AI_LABEL not in _STYLE_PROMPT
+    assert "другого текста" in _STYLE_PROMPT
     assert "газетно-комиксная" in _STYLE_PROMPT
 
 
