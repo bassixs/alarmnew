@@ -21,7 +21,6 @@ dependencies = [
     "numpy>=1.26",
     "tenacity>=8.2",
     "structlog>=24.1",
-    "Pillow>=10.0",
 ]
 
 [project.optional-dependencies]

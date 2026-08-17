@@ -2,11 +2,8 @@
 from __future__ import annotations
 
 import base64
-from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
-
-from PIL import Image, ImageDraw, ImageFont
 
 from aialarm.config import get_settings
 from aialarm.llm.client import get_llm_client
@@ -15,7 +12,6 @@ from aialarm.logging import get_logger
 log = get_logger(__name__)
 
 GENERATED_IMAGES_DIR = Path("data/images/generated")
-AI_LABEL = "Иллюстрация, созданная ИИ"
 
 _CHOICE_SCHEMA = {
     "type": "object",
@@ -103,43 +99,6 @@ def recommend_visual(
     }
 
 
-def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    for candidate in (
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "C:/Windows/Fonts/arial.ttf",
-    ):
-        if Path(candidate).exists():
-            return ImageFont.truetype(candidate, size=size)
-    return ImageFont.load_default()
-
-
-def _add_ai_label(image_bytes: bytes) -> bytes:
-    """Надёжно нанести маркировку поверх результата модели.
-
-    Текст не поручаем генератору: мелкая кириллица часто превращается в псевдотекст.
-    Серверная подпись гарантирует читабельность и единственность маркировки.
-    """
-    with Image.open(BytesIO(image_bytes)) as opened:
-        image = opened.convert("RGB")
-    draw = ImageDraw.Draw(image)
-    width, height = image.size
-    font = _font(max(14, width // 48))
-    padding = max(12, width // 50)
-    bbox = draw.textbbox((0, 0), AI_LABEL, font=font)
-    x = max(padding, width - padding - (bbox[2] - bbox[0]))
-    y = max(padding, height - padding - (bbox[3] - bbox[1]))
-    # Светлая подложка делает серую подпись читаемой на любом сюжете.
-    draw.rounded_rectangle(
-        (x - 7, y - 4, width - padding + 7, height - padding + 4),
-        radius=4,
-        fill=(235, 229, 214),
-    )
-    draw.text((x, y), AI_LABEL, font=font, fill=(110, 110, 110))
-    output = BytesIO()
-    image.save(output, format="JPEG", quality=94, optimize=True)
-    return output.getvalue()
-
-
 def generate_visual_file(brief: str) -> str:
     """Сгенерировать и сохранить квадратную иллюстрацию, вернуть локальный путь."""
     if not brief.strip():
@@ -151,9 +110,9 @@ def generate_visual_file(brief: str) -> str:
         prompt=prompt,
         size=llm.image_size,
     )
-    labelled = _add_ai_label(base64.b64decode(data))
+    image_bytes = base64.b64decode(data)
     GENERATED_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
     target = GENERATED_IMAGES_DIR / f"ai-{uuid4().hex}.jpg"
-    target.write_bytes(labelled)
-    log.info("visual_generated", path=str(target), bytes=len(labelled))
+    target.write_bytes(image_bytes)
+    log.info("visual_generated", path=str(target), bytes=len(image_bytes))
     return str(target)
