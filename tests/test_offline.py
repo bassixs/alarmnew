@@ -207,6 +207,65 @@ def test_main_control_panel_offers_manual_city_post_only():
     assert "ctl:own" not in district_payloads
 
 
+def test_main_ready_card_includes_visual_choice_entrypoint():
+    from aialarm.moderation import max_client
+
+    payloads = [button["payload"] for row in max_client.callback_buttons(55) for button in row]
+    assert "mod:media:55" in payloads
+
+
+def test_visual_choices_keep_editor_in_control_and_mark_recommendation():
+    from aialarm.moderation import max_client
+
+    buttons = max_client.visual_choice_buttons(
+        55,
+        {
+            "has_original_image": True,
+            "generation_available": True,
+            "visual_recommendation": "generate",
+        },
+    )
+    by_payload = {button["payload"]: button["text"] for row in buttons for button in row}
+    assert set(by_payload).issuperset(
+        {"mod:original:55", "mod:generate:55", "mod:none:55", "mod:back:55"}
+    )
+    assert by_payload["mod:generate:55"].endswith("✓")
+
+
+def test_visual_style_prompt_requires_ai_label_and_no_other_text():
+    from aialarm.visuals import AI_LABEL, _STYLE_PROMPT
+
+    assert AI_LABEL in _STYLE_PROMPT
+    assert "Другого текста" in _STYLE_PROMPT
+    assert "газетно-комиксная" in _STYLE_PROMPT
+
+
+def test_generated_or_no_media_never_adds_source_attribution():
+    from aialarm.publishers import service
+
+    raw = SimpleNamespace(source_url="https://example.test/news", image_url=None, image_urls=[])
+    generated = SimpleNamespace(
+        raw=raw,
+        media_mode="generated",
+        generated_image_path="data/images/generated/test.jpg",
+        post_text="Текст",
+        source_attribution="— источник: Пример",
+        hashtags=[],
+    )
+    no_media = SimpleNamespace(
+        raw=raw,
+        media_mode="none",
+        generated_image_path=None,
+        post_text="Текст",
+        source_attribution="— источник: Пример",
+        hashtags=[],
+    )
+    assert service._to_post(generated).text == "Текст"
+    assert service._to_post(generated).image_refs() == ["data/images/generated/test.jpg"]
+    assert service._to_post(no_media).text == "Текст"
+    assert not service._to_post(no_media).image_refs()
+
+
 def test_manual_card_hides_technical_source_url():
     from aialarm.moderation.notify import _card_text
 

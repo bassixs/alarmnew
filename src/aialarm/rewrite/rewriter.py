@@ -143,13 +143,12 @@ def rewrite_one(session: Session, raw: RawNews) -> RewrittenPost:
         temperature=llm.temperature,
     )
     post_text = str(data.get("post_text", "")).strip()
-    # Строка источника (только если есть фото). Подвал площадки добавляется при публикации.
+    # Строка источника храним отдельно: визуальный агент может заменить исходное
+    # фото ИИ-иллюстрацией, и тогда атрибуция к чужому визуалу не нужна.
     attribution = _attribution(
         raw.source_url,
         has_image=bool(raw_image_refs(raw)),
     )
-    if attribution:
-        post_text = f"{post_text}\n\n{attribution}"
 
     post = RewrittenPost(
         raw_id=raw.id,
@@ -157,6 +156,8 @@ def rewrite_one(session: Session, raw: RawNews) -> RewrittenPost:
         suggested_image_prompt=str(data.get("suggested_image_prompt", "")),
         hashtags=list(data.get("hashtags", []) or []),
         model=llm.rewrite_model,
+        media_mode="unselected",
+        source_attribution=attribution,
     )
     session.add(post)
     raw.status = NewsStatus.REWRITTEN

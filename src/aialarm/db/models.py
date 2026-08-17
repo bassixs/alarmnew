@@ -140,6 +140,14 @@ class RewrittenPost(Base):
     # Контур фиксируется при первой попытке, чтобы повтор не ушёл в другой канал.
     publish_profile: Mapped[str] = mapped_column(String(16), default="")
     edited_by_moderator: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Выбор визуала существует только для основного контура. Районные DistrictPost
+    # не используют эти поля.
+    media_mode: Mapped[str] = mapped_column(String(16), default="original")
+    visual_recommendation: Mapped[str] = mapped_column(String(16), default="")
+    visual_reason: Mapped[str] = mapped_column(Text, default="")
+    visual_prompt: Mapped[str] = mapped_column(Text, default="")
+    generated_image_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_attribution: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     raw: Mapped[RawNews] = relationship(back_populates="rewritten")

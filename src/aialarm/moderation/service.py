@@ -108,6 +108,7 @@ def rewrite_and_get(raw_id: int) -> int | None:
         if existing and raw.status in done:
             return existing.id
         rp = existing or rewrite_one(session, raw)
+        _recommend_visual(session, rp)
         raw.status = NewsStatus.MODERATION  # готовый пост ждёт опубликовать/править/отклонить
         session.flush()
         log.info("preview_rewritten", raw_id=raw_id, post_id=rp.id)
@@ -157,6 +158,8 @@ def approve(post_id: int) -> bool:
             return False
         if rp.raw.status in (NewsStatus.PUBLISHED, NewsStatus.REJECTED):
             return False  # уже обработано — не публикуем повторно
+        if rp.media_mode == "unselected":
+            return False
         rp.raw.status = NewsStatus.APPROVED
         log.info("moderation_approved", post_id=post_id)
         return True
@@ -179,6 +182,11 @@ def apply_edit(post_id: int, new_text: str) -> bool:
             return False
         rp.post_text = new_text
         rp.edited_by_moderator = True
+        # После существенной правки прежний выбор изображения мог потерять смысл.
+        # Просим агента оценить обновлённый текст и возвращаем выбор модератору.
+        rp.media_mode = "unselected"
+        rp.generated_image_path = None
+        _recommend_visual(session, rp)
         # Правка не означает согласие на публикацию: редактор должен ещё выбрать
         # площадку (MAX или MAX + ТГ) либо окончательно отклонить карточку.
         rp.raw.status = NewsStatus.MODERATION
@@ -220,12 +228,96 @@ def create_manual_post(text: str) -> int | None:
             suggested_image_prompt=image_prompt,
             hashtags=hashtags,
             model=model,
+            media_mode="unselected",
         )
         session.add(post)
+        session.flush()
+        _recommend_visual(session, post)
         raw.status = NewsStatus.MODERATION
         session.flush()
         log.info("manual_post_rewritten", raw_id=raw.id, post_id=post.id, length=len(post_text))
         return post.id
+
+
+def _recommend_visual(session: Session, rp: RewrittenPost) -> None:
+    """Записать совет GPT Luna, но не принимать решение за модератора."""
+    from aialarm.visuals import recommend_visual
+
+    raw = rp.raw
+    if not raw:
+        return
+    fn = session.scalar(select(FilteredNews).where(FilteredNews.raw_id == raw.id))
+    _, visual_warning = visual_policy(raw.source_url)
+    has_original = bool(raw_image_refs(raw))
+    try:
+        choice = recommend_visual(
+            title=raw.title,
+            body=raw.body,
+            post_text=rp.post_text,
+            has_original=has_original,
+            is_sensitive=bool(fn and fn.is_sensitive),
+            visual_forbidden=bool(visual_warning),
+        )
+        rp.visual_recommendation = choice["recommendation"]
+        rp.visual_reason = choice["reason"]
+        rp.visual_prompt = choice["generation_brief"]
+    except Exception as exc:  # noqa: BLE001
+        # Новость не должна потеряться, если отдельный советник временно недоступен.
+        rp.visual_recommendation = "original" if has_original else "none"
+        rp.visual_reason = "Не удалось получить совет агента — выберите вариант вручную."
+        rp.visual_prompt = ""
+        log.warning("visual_recommendation_failed", post_id=rp.id, error=str(exc))
+
+
+def select_media(post_id: int, mode: str) -> bool:
+    """Сохранить выбор модератора, не создавая картинку без явного подтверждения."""
+    if mode not in {"original", "none"}:
+        return False
+    with session_scope() as session:
+        rp = session.get(RewrittenPost, post_id)
+        if not rp or not rp.raw or rp.raw.status in (NewsStatus.PUBLISHED, NewsStatus.REJECTED):
+            return False
+        if mode == "original" and not raw_image_refs(rp.raw):
+            return False
+        rp.media_mode = mode
+        if mode != "generated":
+            rp.generated_image_path = None
+        log.info("visual_selected", post_id=post_id, mode=mode)
+        return True
+
+
+def generate_post_visual(post_id: int) -> bool:
+    """Создать выбранную модератором ИИ-иллюстрацию и привязать её к посту."""
+    from aialarm.visuals import generate_visual_file
+
+    with session_scope() as session:
+        rp = session.get(RewrittenPost, post_id)
+        if not rp or not rp.raw or rp.raw.status in (NewsStatus.PUBLISHED, NewsStatus.REJECTED):
+            return False
+        brief = rp.visual_prompt
+        if not brief:
+            # Без совета агента не фантазируем: безопаснее дать редактору выбрать
+            # исходник или пост без изображения.
+            return False
+    path = generate_visual_file(brief)
+    with session_scope() as session:
+        rp = session.get(RewrittenPost, post_id)
+        if not rp or not rp.raw or rp.raw.status in (NewsStatus.PUBLISHED, NewsStatus.REJECTED):
+            return False
+        rp.generated_image_path = path
+        rp.media_mode = "generated"
+        log.info("visual_attached", post_id=post_id, path=path)
+        return True
+
+
+def media_is_selected(post_id: int) -> bool:
+    with session_scope() as session:
+        rp = session.get(RewrittenPost, post_id)
+        if not rp:
+            return False
+        if rp.media_mode == "generated":
+            return bool(rp.generated_image_path)
+        return rp.media_mode in {"original", "none"}
 
 
 def get_pending(post_id: int) -> dict | None:
@@ -237,7 +329,15 @@ def get_pending(post_id: int) -> dict | None:
         fn = session.scalar(select(FilteredNews).where(FilteredNews.raw_id == rp.raw_id))
         is_manual = rp.raw.source_type == "manual"
         _, visual_warning = visual_policy(rp.raw.source_url)
-        image_urls = raw_image_refs(rp.raw)
+        source_images = raw_image_refs(rp.raw)
+        if rp.media_mode == "generated" and rp.generated_image_path:
+            image_urls = [rp.generated_image_path]
+        elif rp.media_mode == "none":
+            image_urls = []
+        else:
+            # До выбора оставляем оригинал на карточке: модератор видит, что именно
+            # предложено использовать, но публикация всё равно заблокирована.
+            image_urls = source_images
         return {
             "post_id": rp.id,
             "post_text": rp.post_text,
@@ -251,4 +351,10 @@ def get_pending(post_id: int) -> dict | None:
             "image_url": image_urls[0] if image_urls else None,
             "image_urls": image_urls,
             "visual_warning": visual_warning,
+            "has_original_image": bool(source_images),
+            "media_mode": rp.media_mode,
+            "visual_recommendation": rp.visual_recommendation,
+            "visual_reason": rp.visual_reason,
+            "visual_prompt": rp.visual_prompt,
+            "generation_available": bool(rp.visual_prompt),
         }

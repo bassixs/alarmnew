@@ -65,9 +65,17 @@ def can_publish_now(session: Session, *, retrying: bool = False) -> tuple[bool, 
 
 
 def _to_post(rp: RewrittenPost) -> Post:
-    images = raw_image_refs(rp.raw)
+    if rp.media_mode == "generated" and rp.generated_image_path:
+        images = [rp.generated_image_path]
+    elif rp.media_mode == "none":
+        images = []
+    else:
+        images = raw_image_refs(rp.raw)
+    text = rp.post_text
+    if rp.media_mode == "original" and rp.source_attribution:
+        text = f"{text.rstrip()}\n\n{rp.source_attribution}"
     return Post(
-        text=rp.post_text,
+        text=text,
         image_url=images[0] if images else None,
         image_urls=images,
         hashtags=list(rp.hashtags or []),

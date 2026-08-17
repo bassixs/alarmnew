@@ -79,6 +79,32 @@ def init_db() -> None:
                 connection.exec_driver_sql(
                     "ALTER TABLE rewritten_posts ADD COLUMN publish_profile VARCHAR(16) DEFAULT ''"
                 )
+            if "media_mode" not in post_columns:
+                # Старые карточки сохраняют прежнее поведение и не требуют нового
+                # выбора картинки. Новые посты создаются явно как unselected.
+                connection.exec_driver_sql(
+                    "ALTER TABLE rewritten_posts ADD COLUMN media_mode VARCHAR(16) DEFAULT 'original'"
+                )
+            if "visual_recommendation" not in post_columns:
+                connection.exec_driver_sql(
+                    "ALTER TABLE rewritten_posts ADD COLUMN visual_recommendation VARCHAR(16) DEFAULT ''"
+                )
+            if "visual_reason" not in post_columns:
+                connection.exec_driver_sql(
+                    "ALTER TABLE rewritten_posts ADD COLUMN visual_reason TEXT DEFAULT ''"
+                )
+            if "visual_prompt" not in post_columns:
+                connection.exec_driver_sql(
+                    "ALTER TABLE rewritten_posts ADD COLUMN visual_prompt TEXT DEFAULT ''"
+                )
+            if "generated_image_path" not in post_columns:
+                connection.exec_driver_sql(
+                    "ALTER TABLE rewritten_posts ADD COLUMN generated_image_path TEXT"
+                )
+            if "source_attribution" not in post_columns:
+                connection.exec_driver_sql(
+                    "ALTER TABLE rewritten_posts ADD COLUMN source_attribution TEXT DEFAULT ''"
+                )
             district_post_columns = {
                 column["name"] for column in inspect(_engine).get_columns("district_posts")
             }

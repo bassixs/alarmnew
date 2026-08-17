@@ -56,7 +56,7 @@ def cleanup_old(days: int = 2) -> int:
         from sqlalchemy import select
 
         from aialarm.db import session_scope
-        from aialarm.db.models import NewsStatus, RawNews
+        from aialarm.db.models import NewsStatus, RawNews, RewrittenPost
 
         protected_statuses = (
             NewsStatus.NEW,
@@ -71,11 +71,17 @@ def cleanup_old(days: int = 2) -> int:
                 select(RawNews.image_url, RawNews.image_urls)
                 .where(RawNews.status.in_(protected_statuses))
             ).all()
+            generated_rows = session.execute(
+                select(RewrittenPost.generated_image_path)
+                .join(RawNews, RewrittenPost.raw_id == RawNews.id)
+                .where(RawNews.status.in_(protected_statuses))
+            ).scalars().all()
         refs: list[str] = []
         for primary, album in rows:
             refs.extend(ref for ref in list(album or []) if ref)
             if primary:
                 refs.append(primary)
+        refs.extend(ref for ref in generated_rows if ref)
         protected = {str(Path(ref)).replace("\\", "/") for ref in refs}
     except Exception as e:  # noqa: BLE001
         # При проблеме с БД безопаснее пропустить очистку, чем удалить активное фото.
@@ -84,7 +90,7 @@ def cleanup_old(days: int = 2) -> int:
 
     cutoff = time.time() - days * 86400
     removed = 0
-    for f in IMAGES_DIR.glob("*.jpg"):
+    for f in IMAGES_DIR.rglob("*.jpg"):
         try:
             normalized = str(f).replace("\\", "/")
             if normalized not in protected and f.stat().st_mtime < cutoff:

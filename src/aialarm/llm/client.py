@@ -98,6 +98,24 @@ class LLMClient:
             log.error("llm_bad_json", model=model, content=content[:500])
             raise RuntimeError("LLM не вернула валидный JSON") from e
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=20),
+        reraise=True,
+    )
+    def image(self, *, model: str, prompt: str, size: str = "1024x1024") -> str:
+        """Сгенерировать картинку через OpenAI-совместимый Images API.
+
+        AiTunnel возвращает b64_json; это не публичная ссылка, поэтому сразу
+        сохраняем байты локально и публикуем их как обычный файл.
+        """
+        response = self._client.images.generate(model=model, prompt=prompt, n=1, size=size)
+        image = response.data[0] if response.data else None
+        encoded = getattr(image, "b64_json", None) if image else None
+        if not encoded:
+            raise RuntimeError("Image API не вернул изображение в base64")
+        return encoded
+
 
 @lru_cache(maxsize=1)
 def get_llm_client() -> LLMClient:

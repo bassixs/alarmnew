@@ -197,8 +197,35 @@ def callback_buttons(post_id: int) -> list:
         [
             {"type": "callback", "text": "✏️ Править", "payload": f"mod:edit:{post_id}"},
             {"type": "callback", "text": "❌ Отклонить", "payload": f"mod:reject:{post_id}"},
-        ]
+        ],
+        [
+            {"type": "callback", "text": "🖼 Картинка", "payload": f"mod:media:{post_id}"},
+        ],
     ]
+
+
+def visual_choice_buttons(post_id: int, post: dict) -> list:
+    """Экран осознанного выбора визуала для городского поста."""
+    recommended = post.get("visual_recommendation", "")
+    original_label = "📷 Оригинал" + (" ✓" if recommended == "original" else "")
+    generated_label = "✨ Генерация" + (" ✓" if recommended == "generate" else "")
+    none_label = "🚫 Без картинки" + (" ✓" if recommended == "none" else "")
+    rows: list[list[dict]] = []
+    if post.get("has_original_image"):
+        rows.append([
+            {"type": "callback", "text": original_label, "payload": f"mod:original:{post_id}"},
+        ])
+    if post.get("generation_available"):
+        rows.append([
+            {"type": "callback", "text": generated_label, "payload": f"mod:generate:{post_id}"},
+        ])
+    rows.append([
+        {"type": "callback", "text": none_label, "payload": f"mod:none:{post_id}"},
+    ])
+    rows.append([
+        {"type": "callback", "text": "← К посту", "payload": f"mod:back:{post_id}"},
+    ])
+    return rows
 
 
 def preview_buttons(raw_id: int) -> list:

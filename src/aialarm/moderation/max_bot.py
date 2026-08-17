@@ -36,7 +36,8 @@ from aialarm.control import (
 from aialarm.logging import get_logger
 from aialarm.moderation import districts, max_client, service
 from aialarm.moderation.notify import (
-    edit_card, edit_district_card, finalize_card, finalize_district_card, send_card,
+    edit_card, edit_district_card, edit_visual_choices, finalize_card, finalize_district_card,
+    send_card,
 )
 from aialarm.publishers.service import publish_post_id_sync
 
@@ -398,9 +399,39 @@ def _handle_callback(update: dict) -> None:
     if prefix != "mod" or obj_id is None:
         return
     post_id = obj_id
+    if action == "media":
+        max_client.answer_callback(cid, "Выберите вариант визуала")
+        if not edit_visual_choices(post_id, mid or ""):
+            log.warning("visual_choices_open_failed", post_id=post_id)
+        return
+    if action == "back":
+        max_client.answer_callback(cid, "Возвращаю карточку")
+        if not edit_card(post_id, mid or ""):
+            log.warning("visual_card_return_failed", post_id=post_id)
+        return
+    if action in {"original", "none"}:
+        if not service.select_media(post_id, action):
+            max_client.answer_callback(cid, "Этот вариант сейчас недоступен")
+            return
+        max_client.answer_callback(cid, "Визуал выбран")
+        if not edit_card(post_id, mid or ""):
+            log.warning("visual_select_card_edit_failed", post_id=post_id, mode=action)
+        return
+    if action == "generate":
+        if not _submit_post_action(
+            post_id,
+            lambda: _generate_post_visual(post_id, mid or ""),
+            cid,
+            "🎨 Генерирую иллюстрацию…",
+        ):
+            max_client.answer_callback(cid, "⏳ Уже генерирую…")
+        return
     if action in {"approve", "approve_max", "approve_all"}:
         if not get_pipeline_state().active:
             max_client.answer_callback(cid, "Помощник сейчас вне смены")
+            return
+        if not service.media_is_selected(post_id):
+            max_client.answer_callback(cid, "Сначала выберите «Картинка»")
             return
         selected_targets = ["max"] if action == "approve_max" else None
         confirmation = "⏳ Публикую в MAX…" if selected_targets else "⏳ Публикую в MAX и ТГ…"
@@ -496,6 +527,22 @@ def _approve_and_publish(
         else "⚠️ Не опубликовано на всех площадках — повтор будет автоматически"
     )
     finalize_card(post_id, message_id, header)
+
+
+def _generate_post_visual(post_id: int, message_id: str) -> None:
+    try:
+        if not service.generate_post_visual(post_id):
+            raise RuntimeError("для этого поста генерация сейчас недоступна")
+        if not edit_card(post_id, message_id):
+            log.warning("generated_visual_card_edit_failed", post_id=post_id)
+    except Exception as exc:  # noqa: BLE001
+        log.error("generated_visual_failed", post_id=post_id, error=str(exc))
+        # Возвращаем карточку и её кнопки, чтобы редактор мог выбрать другой вариант.
+        if not edit_card(post_id, message_id):
+            log.warning("generated_visual_restore_failed", post_id=post_id)
+        chat = get_settings().project.moderation.max_chat_id
+        if chat:
+            max_client.send_message(chat, "⚠️ Не удалось сгенерировать картинку. Выберите другой вариант.")
 
 
 def _reject_post(post_id: int, message_id: str) -> None:

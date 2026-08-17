@@ -33,13 +33,30 @@ def _card_text(p: dict) -> str:
     flag = "⚠️ ЧУВСТВИТЕЛЬНАЯ ТЕМА\n" if p["is_sensitive"] else ""
     visual = f"🚫 ВИЗУАЛ БРАТЬ НЕЛЬЗЯ: {p['visual_warning']}\n" if p.get("visual_warning") else ""
     source = f"🔗 источник: {p['source_url']}\n" if p.get("source_url") else ""
+    visual_choice = _visual_choice_text(p)
     meta = (
         f"{flag}{visual}📊 Насколько новость подходит каналу: {p['confidence']} из 100\n"
         f"📌 Тезис: {p['matched_thesis']}\n"
+        f"{visual_choice}"
         f"{source}"
         f"{'─' * 20}\n"
     )
     return (meta + p["post_text"])[:_CARD_LIMIT]
+
+
+def _visual_choice_text(p: dict) -> str:
+    labels = {
+        "original": "оригинал",
+        "generate": "генерация",
+        "none": "без картинки",
+    }
+    mode = p.get("media_mode", "")
+    recommendation = labels.get(p.get("visual_recommendation", ""), "выберите вручную")
+    selected = labels.get(mode, "не выбран")
+    text = f"🖼 Визуал: {selected}; агент рекомендует — {recommendation}\n"
+    if p.get("visual_reason"):
+        text += f"🤖 {p['visual_reason']}\n"
+    return text
 
 
 async def _send(post_id: int) -> None:
@@ -260,6 +277,23 @@ def edit_district_card(post_id: int, message_id: str, notice: str = "") -> bool:
     return max_client.edit_message(
         message_id, text, buttons=max_client.district_callback_buttons(post_id),
         image_refs=(p.get("image_urls") or [])[:1],
+    )
+
+
+def edit_visual_choices(post_id: int, message_id: str) -> bool:
+    """Открыть на готовой карточке выбор оригинала/генерации/отказа."""
+    if get_settings().project.moderation.platform != "max" or not message_id:
+        return False
+    from aialarm.moderation import max_client
+
+    p = get_pending(post_id)
+    if not p:
+        return False
+    return max_client.edit_message(
+        message_id,
+        _card_text(p),
+        buttons=max_client.visual_choice_buttons(post_id, p),
+        image_refs=p.get("image_urls"),
     )
 
 

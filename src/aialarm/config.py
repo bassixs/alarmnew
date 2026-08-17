@@ -173,6 +173,10 @@ class PublishCfg(BaseModel):
 class LLMCfg(BaseModel):
     classify_model: str = "minimax-m3"
     rewrite_model: str = "claude-sonnet-4.5"
+    # Отдельный недорогой редакционный агент: выбирает лучший тип визуала к посту.
+    visual_agent_model: str = "gpt-5.6-luna"
+    image_model: str = "gpt-image-2"
+    image_size: str = "1024x1024"
     combined_call: bool = False
     max_tokens: int = 1500
     temperature: float = 0.3  # рерайт — немного «живости»; классификатор форсит 0 в коде
