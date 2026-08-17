@@ -45,6 +45,8 @@ log = get_logger(__name__)
 # user_id -> (post_id, message_id карточки), ожидающий исправленного текста
 _edit_state: dict[int, tuple[int, str]] = {}
 _district_edit_state: dict[int, tuple[int, str]] = {}
+# user_id ожидает текст собственного городского поста из панели /bot.
+_own_post_state: set[int] = set()
 
 # Long-polling должен быстро подтверждать callback: LLM-рерайт, публикация на две
 # площадки и обновление карточки могут занять несколько секунд. Один post_id обрабатываем
@@ -283,6 +285,26 @@ def _handle_control(
                 callback_id,
                 "Тестовый контур" if profile == "test" else "Основной контур",
             )
+    elif action == "own":
+        if not get_pipeline_state().active:
+            if callback_id:
+                max_client.answer_callback(callback_id, "Помощник сейчас вне смены")
+            return
+        if user_id is None:
+            if callback_id:
+                max_client.answer_callback(callback_id, "Не удалось определить пользователя")
+            return
+        _own_post_state.add(user_id)
+        if callback_id:
+            max_client.answer_callback(callback_id, "Пришлите текст своего поста")
+        chat = get_settings().project.moderation.max_chat_id
+        if chat:
+            max_client.send_message(
+                chat,
+                "✍️ Пришлите текст своего поста следующим сообщением. "
+                "Я перепишу его в стиле канала и верну на согласование.",
+            )
+        return
     elif action == "status" and callback_id:
         max_client.answer_callback(callback_id, "Статус обновлён")
     _send_control_panel(message_id=message_id, notice=notice)
@@ -481,6 +503,19 @@ def _reject_post(post_id: int, message_id: str) -> None:
     finalize_card(post_id, message_id, "❌ ОТКЛОНЕНО")
 
 
+def _create_own_post(text: str) -> None:
+    try:
+        post_id = service.create_manual_post(text)
+        if not post_id:
+            return
+        send_card(post_id)
+    except Exception as exc:  # noqa: BLE001
+        log.error("manual_post_create_failed", error=str(exc))
+        chat = get_settings().project.moderation.max_chat_id
+        if chat:
+            max_client.send_message(chat, "⚠️ Не удалось переписать свой пост. Попробуйте ещё раз.")
+
+
 def _handle_message(msg: dict) -> None:
     sender = msg.get("sender") or {}
     user_id = sender.get("user_id")
@@ -508,6 +543,15 @@ def _handle_message(msg: dict) -> None:
             return
         if not edit_district_card(post_id, card_mid):
             log.warning("district_edit_card_failed", post_id=post_id)
+        return
+    main_chat = get_settings().project.moderation.max_chat_id
+    if user_id in _own_post_state and text and chat_id == main_chat:
+        _own_post_state.discard(user_id)
+        if not get_pipeline_state().active:
+            max_client.send_message(main_chat, "⏸ Помощник сейчас вне смены. Включите его в панели /bot.")
+            return
+        max_client.send_message(main_chat, "✍️ Переписываю свой пост…")
+        _actions.submit(_create_own_post, text)
         return
     if user_id in _edit_state and text:
         post_id, card_mid = _edit_state.pop(user_id)

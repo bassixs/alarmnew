@@ -32,10 +32,11 @@ def _keyboard(post_id: int) -> InlineKeyboardMarkup:
 def _card_text(p: dict) -> str:
     flag = "⚠️ ЧУВСТВИТЕЛЬНАЯ ТЕМА\n" if p["is_sensitive"] else ""
     visual = f"🚫 ВИЗУАЛ БРАТЬ НЕЛЬЗЯ: {p['visual_warning']}\n" if p.get("visual_warning") else ""
+    source = f"🔗 источник: {p['source_url']}\n" if p.get("source_url") else ""
     meta = (
         f"{flag}{visual}📊 Насколько новость подходит каналу: {p['confidence']} из 100\n"
         f"📌 Тезис: {p['matched_thesis']}\n"
-        f"🔗 источник: {p['source_url']}\n"
+        f"{source}"
         f"{'─' * 20}\n"
     )
     return (meta + p["post_text"])[:_CARD_LIMIT]

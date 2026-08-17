@@ -228,6 +228,9 @@ def control_buttons(profile: str = "test") -> list:
             {"type": "callback", "text": test_label, "payload": "ctl:profile_test"},
             {"type": "callback", "text": main_label, "payload": "ctl:profile_main"},
         ],
+        [
+            {"type": "callback", "text": "✍️ Свой пост", "payload": "ctl:own"},
+        ],
     ]
 
 

@@ -102,6 +102,34 @@ def _domain(url: str) -> str:
     return net or url
 
 
+def rewrite_editor_text(text: str) -> tuple[str, str, list[str], str]:
+    """Переписать материал, который редактор прислал напрямую в бот.
+
+    Такой материал не является новостью из источника, поэтому не добавляем к нему
+    атрибуцию. Сам стиль, модель и ограничения остаются точно такими же, как у
+    основного городского рерайта.
+    """
+    llm = get_settings().project.llm
+    data = get_llm_client().structured(
+        model=llm.rewrite_model,
+        system=_build_system(),
+        user=(
+            "Текст прислал редактор канала. Перепиши его по правилам выше, "
+            "сохраняя факты и не добавляя ничего от себя:\n\n"
+            f"{text.strip()[:5000]}"
+        ),
+        schema=_SCHEMA,
+        max_tokens=llm.max_tokens,
+        temperature=llm.temperature,
+    )
+    return (
+        str(data.get("post_text", "")).strip(),
+        str(data.get("suggested_image_prompt", "")),
+        list(data.get("hashtags", []) or []),
+        llm.rewrite_model,
+    )
+
+
 def rewrite_one(session: Session, raw: RawNews) -> RewrittenPost:
     system = _build_system()
     user = f'Новость: "{raw.title}. {(raw.body or "")[:4000]}"'

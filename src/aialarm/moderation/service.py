@@ -14,10 +14,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from aialarm.collectors.base import make_dedup_key
 from aialarm.config import get_settings
 from aialarm.db import session_scope
 from aialarm.db.models import FilteredNews, NewsStatus, RawNews, RewrittenPost
@@ -184,6 +186,48 @@ def apply_edit(post_id: int, new_text: str) -> bool:
         return True
 
 
+def create_manual_post(text: str) -> int | None:
+    """Создать готовую карточку из текста, который прислал редактор.
+
+    Ручной материал намеренно проходит только городской рерайт и модерацию:
+    фильтр, сборщики и районный контур в нём не участвуют.
+    """
+    clean_text = text.strip()
+    if not clean_text:
+        return None
+
+    from aialarm.rewrite.rewriter import rewrite_editor_text
+
+    manual_url = f"manual://editor/{uuid4().hex}"
+    title = next((line.strip() for line in clean_text.splitlines() if line.strip()), "Свой пост")
+    with session_scope() as session:
+        raw = RawNews(
+            dedup_key=make_dedup_key(manual_url, title),
+            source_type="manual",
+            source_url=manual_url,
+            title=title[:500],
+            body=clean_text,
+            status=NewsStatus.REWRITTEN,
+        )
+        session.add(raw)
+        session.flush()
+        post_text, image_prompt, hashtags, model = rewrite_editor_text(clean_text)
+        if not post_text:
+            raise ValueError("LLM не вернула текст ручного поста")
+        post = RewrittenPost(
+            raw_id=raw.id,
+            post_text=post_text,
+            suggested_image_prompt=image_prompt,
+            hashtags=hashtags,
+            model=model,
+        )
+        session.add(post)
+        raw.status = NewsStatus.MODERATION
+        session.flush()
+        log.info("manual_post_rewritten", raw_id=raw.id, post_id=post.id, length=len(post_text))
+        return post.id
+
+
 def get_pending(post_id: int) -> dict | None:
     """Данные карточки для отображения модератору."""
     with session_scope() as session:
@@ -191,12 +235,15 @@ def get_pending(post_id: int) -> dict | None:
         if not rp or not rp.raw:
             return None
         fn = session.scalar(select(FilteredNews).where(FilteredNews.raw_id == rp.raw_id))
+        is_manual = rp.raw.source_type == "manual"
         _, visual_warning = visual_policy(rp.raw.source_url)
         image_urls = raw_image_refs(rp.raw)
         return {
             "post_id": rp.id,
             "post_text": rp.post_text,
-            "source_url": rp.raw.source_url,
+            # У авторского материала нет внешнего источника: не показываем
+            # технический manual:// URL на карточке модератора.
+            "source_url": "" if is_manual else rp.raw.source_url,
             "title": rp.raw.title,
             "confidence": fn.confidence if fn else 0,
             "matched_thesis": fn.matched_thesis if fn else "",

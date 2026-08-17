@@ -196,6 +196,34 @@ def test_district_control_buttons_include_independent_schedule_controls():
     assert {"dctl:on", "dctl:off", "dctl:auto", "dctl:statistics"}.issubset(payloads)
 
 
+def test_main_control_panel_offers_manual_city_post_only():
+    from aialarm.moderation import max_client
+
+    main_payloads = [button["payload"] for row in max_client.control_buttons() for button in row]
+    district_payloads = [
+        button["payload"] for row in max_client.district_control_buttons() for button in row
+    ]
+    assert "ctl:own" in main_payloads
+    assert "ctl:own" not in district_payloads
+
+
+def test_manual_card_hides_technical_source_url():
+    from aialarm.moderation.notify import _card_text
+
+    card = _card_text(
+        {
+            "is_sensitive": False,
+            "visual_warning": "",
+            "confidence": 0,
+            "matched_thesis": "",
+            "source_url": "",
+            "post_text": "Готовый текст",
+        }
+    )
+    assert "источник:" not in card
+    assert "Готовый текст" in card
+
+
 def test_district_quota_buttons_target_only_the_selected_district():
     from aialarm.moderation import max_client
 
