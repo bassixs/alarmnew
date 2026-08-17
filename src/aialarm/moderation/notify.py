@@ -34,14 +34,32 @@ def _card_text(p: dict) -> str:
     visual = f"🚫 ВИЗУАЛ БРАТЬ НЕЛЬЗЯ: {p['visual_warning']}\n" if p.get("visual_warning") else ""
     source = f"🔗 источник: {p['source_url']}\n" if p.get("source_url") else ""
     visual_choice = _visual_choice_text(p)
-    meta = (
-        f"{flag}{visual}📊 Насколько новость подходит каналу: {p['confidence']} из 100\n"
-        f"📌 Тезис: {p['matched_thesis']}\n"
-        f"{visual_choice}"
-        f"{source}"
-        f"{'─' * 20}\n"
-    )
+    if p.get("is_manual"):
+        # Собственный текст редактора не проходил новостный фильтр — оценка 0/100
+        # и пустой тезис здесь только путают модератора.
+        meta = f"✍️ СВОЙ ПОСТ\n{visual_choice}{'─' * 20}\n"
+    else:
+        meta = (
+            f"{flag}{visual}📊 Насколько новость подходит каналу: {p['confidence']} из 100\n"
+            f"📌 Тезис: {p['matched_thesis']}\n"
+            f"{visual_choice}"
+            f"{source}"
+            f"{'─' * 20}\n"
+        )
     return (meta + p["post_text"])[:_CARD_LIMIT]
+
+
+def _card_buttons(post_id: int, p: dict) -> list:
+    """Пока редактор не выбрал визуал, публиковать пост нельзя.
+
+    Это делает выбор картинки первым шагом: исходное фото уже видно в карточке,
+    а сгенерированное появится сразу после нажатия «Генерация».
+    """
+    from aialarm.moderation import max_client
+
+    if p.get("media_mode") == "unselected":
+        return max_client.visual_choice_buttons(post_id, p)
+    return max_client.callback_buttons(post_id)
 
 
 def _visual_choice_text(p: dict) -> str:
@@ -105,7 +123,7 @@ def _send_max(post_id: int) -> None:
     max_client.send_message(
         chat,
         _card_text(p),
-        buttons=max_client.callback_buttons(post_id),
+        buttons=_card_buttons(post_id, p),
         image_refs=p.get("image_urls"),
     )
 
@@ -122,7 +140,7 @@ def edit_card(post_id: int, message_id: str) -> bool:
     return max_client.edit_message(
         message_id,
         _card_text(p),
-        buttons=max_client.callback_buttons(post_id),
+        buttons=_card_buttons(post_id, p),
         image_refs=p.get("image_urls"),
     )
 

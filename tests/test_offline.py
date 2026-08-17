@@ -214,6 +214,23 @@ def test_main_ready_card_includes_visual_choice_entrypoint():
     assert "mod:media:55" in payloads
 
 
+def test_unselected_visual_shows_choices_before_publish_buttons():
+    from aialarm.moderation.notify import _card_buttons
+
+    buttons = _card_buttons(
+        55,
+        {
+            "media_mode": "unselected",
+            "has_original_image": True,
+            "generation_available": True,
+            "visual_recommendation": "generate",
+        },
+    )
+    payloads = [button["payload"] for row in buttons for button in row]
+    assert "mod:generate:55" in payloads
+    assert "mod:approve_max:55" not in payloads
+
+
 def test_visual_choices_keep_editor_in_control_and_mark_recommendation():
     from aialarm.moderation import max_client
 
@@ -226,9 +243,7 @@ def test_visual_choices_keep_editor_in_control_and_mark_recommendation():
         },
     )
     by_payload = {button["payload"]: button["text"] for row in buttons for button in row}
-    assert set(by_payload).issuperset(
-        {"mod:original:55", "mod:generate:55", "mod:none:55", "mod:back:55"}
-    )
+    assert set(by_payload).issuperset({"mod:original:55", "mod:generate:55", "mod:none:55"})
     assert by_payload["mod:generate:55"].endswith("✓")
 
 
@@ -277,9 +292,12 @@ def test_manual_card_hides_technical_source_url():
             "matched_thesis": "",
             "source_url": "",
             "post_text": "Готовый текст",
+            "is_manual": True,
         }
     )
     assert "источник:" not in card
+    assert "Насколько новость подходит" not in card
+    assert "Тезис:" not in card
     assert "Готовый текст" in card
 
 

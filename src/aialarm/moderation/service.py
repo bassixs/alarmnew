@@ -341,6 +341,7 @@ def get_pending(post_id: int) -> dict | None:
         return {
             "post_id": rp.id,
             "post_text": rp.post_text,
+            "is_manual": is_manual,
             # У авторского материала нет внешнего источника: не показываем
             # технический manual:// URL на карточке модератора.
             "source_url": "" if is_manual else rp.raw.source_url,

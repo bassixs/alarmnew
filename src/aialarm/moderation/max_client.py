@@ -199,7 +199,7 @@ def callback_buttons(post_id: int) -> list:
             {"type": "callback", "text": "❌ Отклонить", "payload": f"mod:reject:{post_id}"},
         ],
         [
-            {"type": "callback", "text": "🖼 Картинка", "payload": f"mod:media:{post_id}"},
+            {"type": "callback", "text": "🖼 Изменить картинку", "payload": f"mod:media:{post_id}"},
         ],
     ]
 
@@ -221,9 +221,6 @@ def visual_choice_buttons(post_id: int, post: dict) -> list:
         ])
     rows.append([
         {"type": "callback", "text": none_label, "payload": f"mod:none:{post_id}"},
-    ])
-    rows.append([
-        {"type": "callback", "text": "← К посту", "payload": f"mod:back:{post_id}"},
     ])
     return rows
 
