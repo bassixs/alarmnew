@@ -20,6 +20,8 @@ from aialarm.db import session_scope
 from aialarm.db.models import DistrictDailyControl, DistrictPost, FilteredNews, NewsStatus, RawNews
 from aialarm.logging import get_logger
 from aialarm.media import raw_image_refs
+from aialarm.moderation.delivery import deliver_previews, enqueue_preview
+from aialarm.moderation.feedback import record_feedback
 from aialarm.publishers.base import Post
 from aialarm.publishers.max import MaxPublisher
 from aialarm.publishers.telegram import TelegramPublisher
@@ -242,17 +244,9 @@ def route_district_previews(
             session.add(candidate)
             session.flush()
             created.append(candidate.id)
+            enqueue_preview(session, "district", candidate.id)
 
-    from aialarm.moderation.notify import send_district_preview
-    import time as wait
-
-    for index, post_id in enumerate(created):
-        if index:
-            wait.sleep(2)  # MAX допускает 2 сообщения/секунду в один чат
-        try:
-            send_district_preview(post_id)
-        except Exception as exc:  # noqa: BLE001
-            log.error("district_preview_notify_failed", post_id=post_id, error=str(exc))
+    deliver_previews("district", limit)
     log.info("district_preview_routing_done", to_preview=len(created), unmatched=unmatched)
     return {"to_preview": len(created), "unmatched": unmatched}
 
@@ -292,10 +286,10 @@ def get_district_pending(post_id: int) -> dict | None:
     return _card_data(post_id)
 
 
-def rewrite_district_post(post_id: int) -> bool:
+def rewrite_district_post(post_id: int, *, editor_id: int | None = None) -> bool:
     with session_scope() as session:
         post = session.get(DistrictPost, post_id)
-        if not post or not post.raw or post.status not in {"preview", "moderation"}:
+        if not post or not post.raw or post.status != "preview":
             return False
         district = district_for_id(post.district_id)
         if not district:
@@ -311,6 +305,9 @@ def rewrite_district_post(post_id: int) -> bool:
             temperature=llm.temperature,
         )
         text = str(data.get("post_text", "")).strip()
+        record_feedback(session, raw_id=post.raw_id, district_post_id=post.id,
+                        action="generated", model=llm.rewrite_model, text_after=text,
+                        editor_id=editor_id, platform="max")
         # Источник добавляется при публикации: кликабельной ссылкой и всегда, даже без фото.
         post.post_text = text
         post.model = llm.rewrite_model
@@ -319,11 +316,15 @@ def rewrite_district_post(post_id: int) -> bool:
         return True
 
 
-def cancel_district_post(post_id: int) -> bool:
+def cancel_district_post(post_id: int, *, reason: str = "", editor_id: int | None = None) -> bool:
     with session_scope() as session:
         post = session.get(DistrictPost, post_id)
-        if not post or post.status in {"published", "rejected"}:
+        if not post or post.status not in {"preview", "moderation"}:
             return False
+        record_feedback(session, raw_id=post.raw_id, district_post_id=post.id,
+                        action="cancel" if post.status == "preview" else "reject",
+                        stage="selection" if post.status == "preview" else "rewrite",
+                        reason=reason, editor_id=editor_id, platform="max", model=post.model)
         post.status = "rejected"
         if post.raw:
             # После завершения смены изображение отклонённой карточки можно безопасно убрать.
@@ -331,11 +332,16 @@ def cancel_district_post(post_id: int) -> bool:
         return True
 
 
-def edit_district_post(post_id: int, text: str) -> bool:
+def edit_district_post(post_id: int, text: str, *, editor_id: int | None = None) -> bool:
+    if not text.strip():
+        return False
     with session_scope() as session:
         post = session.get(DistrictPost, post_id)
-        if not post or post.status in {"published", "rejected"}:
+        if not post or post.status != "moderation":
             return False
+        record_feedback(session, raw_id=post.raw_id, district_post_id=post.id, action="edit",
+                        editor_id=editor_id, platform="max", model=post.model,
+                        text_before=post.post_text, text_after=text.strip())
         post.post_text = text.strip()
         post.edited_by_moderator = True
         post.status = "moderation"
@@ -367,7 +373,7 @@ def _delivery_profile(post: DistrictPost) -> str:
 
 
 def publish_district_post(
-    post_id: int, selected_targets: list[str] | None = None
+    post_id: int, selected_targets: list[str] | None = None, *, editor_id: int | None = None
 ) -> tuple[bool, str]:
     """Опубликовать районный пост в MAX либо одновременно в MAX и Telegram.
 
@@ -415,6 +421,8 @@ def publish_district_post(
         if previous and now - _as_utc(previous) < timedelta(minutes=cfg.min_minutes_between_posts):
             return False, "не выдержан интервал между постами этого района"
         post.publish_profile = profile
+        record_feedback(session, raw_id=post.raw_id, district_post_id=post.id, action="approve",
+                        editor_id=editor_id, platform="max", model=post.model)
         # Районный пост не должен удерживать десяток оригиналов в RAM: одного фото
         # достаточно для карточки и публикации.
         # Карточки, переписанные до появления кликабельного источника, могли содержать

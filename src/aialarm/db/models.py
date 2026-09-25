@@ -215,3 +215,39 @@ class DistrictDailyControl(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+
+
+class ModerationDelivery(Base):
+    """Durable preview queue; retries survive scheduler and bot restarts."""
+
+    __tablename__ = "moderation_deliveries"
+    __table_args__ = (UniqueConstraint("kind", "object_id", name="uq_moderation_delivery"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(24))
+    object_id: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ModerationFeedback(Base):
+    """Append-only decisions and text revisions for both editorial workflows."""
+
+    __tablename__ = "moderation_feedback"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    raw_id: Mapped[int] = mapped_column(ForeignKey("raw_news.id"), index=True)
+    post_id: Mapped[int | None] = mapped_column(ForeignKey("rewritten_posts.id"), nullable=True)
+    district_post_id: Mapped[int | None] = mapped_column(ForeignKey("district_posts.id"), nullable=True)
+    stage: Mapped[str] = mapped_column(String(24))
+    action: Mapped[str] = mapped_column(String(24))
+    editor_id: Mapped[str] = mapped_column(String(64), default="")
+    platform: Mapped[str] = mapped_column(String(16), default="")
+    reason: Mapped[str] = mapped_column(Text, default="")
+    model: Mapped[str] = mapped_column(String(64), default="")
+    text_before: Mapped[str | None] = mapped_column(Text, nullable=True)
+    text_after: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

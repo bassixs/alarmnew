@@ -356,7 +356,7 @@ def test_max_edit_returns_to_publish_choice_without_autopublish():
     original_publish = max_bot.publish_post_id_sync
     try:
         max_bot._edit_state[42] = (7, "mid-7")
-        max_bot.service.apply_edit = lambda post_id, text: calls.append(("save", post_id, text)) or True
+        max_bot.service.apply_edit = lambda post_id, text, **kwargs: calls.append(("save", post_id, text)) or True
         max_bot.edit_card = lambda post_id, mid: calls.append(("card", post_id, mid)) or True
         max_bot.send_card = lambda post_id: calls.append(("send", post_id))
         max_bot.publish_post_id_sync = lambda *args: (_ for _ in ()).throw(
@@ -484,7 +484,8 @@ def test_partial_publication_retries_only_failed_platform():
     original_publisher = service.get_publisher
     original_profile = service.get_publish_profile
     service.get_settings = lambda: SimpleNamespace(
-        project=SimpleNamespace(publish=SimpleNamespace(targets=["telegram", "max"]))
+        project=SimpleNamespace(publish=SimpleNamespace(
+            targets=["telegram", "max"], max_posts_per_day=5, min_minutes_between_posts=0))
     )
     service.get_publish_profile = lambda: "test"
     service.get_publisher = lambda platform, profile=None: FakePublisher(platform)
@@ -543,7 +544,8 @@ def test_max_only_publication_does_not_retry_telegram():
     original_publisher = service.get_publisher
     original_profile = service.get_publish_profile
     service.get_settings = lambda: SimpleNamespace(
-        project=SimpleNamespace(publish=SimpleNamespace(targets=["telegram", "max"]))
+        project=SimpleNamespace(publish=SimpleNamespace(
+            targets=["telegram", "max"], max_posts_per_day=5, min_minutes_between_posts=0))
     )
     service.get_publish_profile = lambda: "test"
     service.get_publisher = lambda platform, profile=None: FakePublisher(platform)

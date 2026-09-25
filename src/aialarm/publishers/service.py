@@ -24,6 +24,7 @@ from aialarm.db.models import (
 from aialarm.logging import get_logger
 from aialarm.media import raw_image_refs
 from aialarm.publishers.base import Post, get_publisher
+from aialarm.publishers.locking import serialized_publication
 
 log = get_logger(__name__)
 
@@ -165,6 +166,8 @@ async def publish_post(
     вызываются повторно, поэтому повторная попытка после частичного сбоя не создаёт дубль.
     """
     targets = _targets()
+    if not rp.raw or rp.raw.status not in (NewsStatus.APPROVED, NewsStatus.PUBLISHED):
+        return False
     if not targets:
         log.error("publish_no_targets", post_id=rp.id)
         return False
@@ -184,11 +187,25 @@ async def publish_post(
             rp.raw.status = NewsStatus.PUBLISHED
         return True
 
+    if rp.raw.status != NewsStatus.APPROVED or rp.media_mode == "unselected":
+        return False
+    allowed, reason = can_publish_now(session, retrying=bool(_successful_platforms(session, rp.id)))
+    if not allowed:
+        log.info("publish_queued", post_id=rp.id, reason=reason)
+        # Persist selected platforms and profile even when publication is deferred.
+        session.flush()
+        return False
+
     post = _to_post(rp)
     successful = set(targets) - set(pending)
     for platform in pending:
         publisher = get_publisher(platform, profile)
-        result = await publisher.publish(post)
+        try:
+            result = await publisher.publish(post)
+        except Exception as exc:  # noqa: BLE001
+            from aialarm.publishers.base import PublishResult
+
+            result = PublishResult(ok=False, error=str(exc))
         status = (
             PublishStatus.SUCCESS
             if result.ok
@@ -206,6 +223,8 @@ async def publish_post(
         )
         if result.ok:
             successful.add(platform)
+        # A later platform failure must not roll back an already delivered message.
+        session.commit()
         log.info(
             "published",
             post_id=rp.id,
@@ -220,8 +239,16 @@ async def publish_post(
     return complete
 
 
-def publish_post_id_sync(post_id: int, selected_targets: list[str] | None = None) -> bool:
+@serialized_publication
+def publish_post_id_sync(post_id: int, selected_targets: list[str] | None = None, *,
+                         approve: bool = False, editor_id: int | None = None,
+                         moderation_platform: str = "") -> bool:
     """Синхронная обёртка для вызова из бота-модератора (кнопка «Опубликовать»)."""
+    if approve:
+        from aialarm.moderation.service import approve as approve_post
+
+        if not approve_post(post_id, editor_id=editor_id, platform=moderation_platform):
+            return False
     with session_scope() as session:
         rp = session.get(RewrittenPost, post_id)
         if not rp:
@@ -229,6 +256,7 @@ def publish_post_id_sync(post_id: int, selected_targets: list[str] | None = None
         return asyncio.run(publish_post(session, rp, selected_targets))
 
 
+@serialized_publication
 def run_publish_stage(limit: int = 10) -> dict[str, int]:
     """Опубликовать одобренные посты и повторить только недоставленные площадки."""
     stats = {"published": 0, "skipped": 0, "failed": 0, "requeued_partial": 0}

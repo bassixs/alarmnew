@@ -13,7 +13,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -25,6 +25,8 @@ from aialarm.db import session_scope
 from aialarm.db.models import FilteredNews, NewsStatus, RawNews, RewrittenPost
 from aialarm.logging import get_logger
 from aialarm.media import raw_image_refs
+from aialarm.moderation.delivery import deliver_previews, enqueue_preview
+from aialarm.moderation.feedback import record_feedback
 from aialarm.source_policy import visual_policy
 
 log = get_logger(__name__)
@@ -54,10 +56,7 @@ def route_previews(
     """RELEVANT -> PREVIEW: шлём модератору ОРИГИНАЛ (без рерайта) с кнопками
     «Переписать»/«Отменить». Рерайт (Sonnet) откладывается до нажатия «Переписать» —
     не тратим деньги на посты, которые не возьмут."""
-    from aialarm.moderation.notify import send_preview
-
     stats = {"to_preview": 0, "auto_approved": 0}
-    to_notify: list[int] = []
     with session_scope() as session:
         stmt = select(RawNews).where(
             RawNews.status == NewsStatus.RELEVANT,
@@ -70,31 +69,23 @@ def route_previews(
             if _needs_moderation(session, raw):
                 raw.status = NewsStatus.PREVIEW
                 stats["to_preview"] += 1
-                to_notify.append(raw.id)
+                enqueue_preview(session, "main", raw.id)
             else:
                 # Автопубликация без модерации: переписываем сразу и одобряем.
                 from aialarm.rewrite.rewriter import rewrite_one
 
-                rewrite_one(session, raw)
+                post = rewrite_one(session, raw)
+                post.media_mode = "original" if raw_image_refs(raw) else "none"
                 raw.status = NewsStatus.APPROVED
                 stats["auto_approved"] += 1
 
-    # Throttle ~4с между карточками: лимит мессенджеров ~20 сообщений/мин в один чат.
-    import time
-
-    for i, raw_id in enumerate(to_notify):
-        if i:
-            time.sleep(4)
-        try:
-            send_preview(raw_id)
-        except Exception as e:  # noqa: BLE001
-            log.error("preview_notify_failed", raw_id=raw_id, error=str(e))
+    stats["delivered"] = deliver_previews("main", limit)
 
     log.info("preview_routing_done", **stats)
     return stats
 
 
-def rewrite_and_get(raw_id: int) -> int | None:
+def rewrite_and_get(raw_id: int, *, editor_id: int | None = None, platform: str = "") -> int | None:
     """По нажатию «Переписать»: переписываем оригинал (Sonnet), возвращаем post_id
     готового поста. Если уже переписан — возвращаем существующий (без повтора)."""
     from aialarm.rewrite.rewriter import rewrite_one
@@ -107,7 +98,11 @@ def rewrite_and_get(raw_id: int) -> int | None:
         existing = session.scalar(select(RewrittenPost).where(RewrittenPost.raw_id == raw_id))
         if existing and raw.status in done:
             return existing.id
+        if raw.status != NewsStatus.PREVIEW:
+            return None
         rp = existing or rewrite_one(session, raw)
+        record_feedback(session, raw_id=raw.id, post_id=rp.id, action="accept",
+                        stage="selection", editor_id=editor_id, platform=platform)
         _recommend_visual(session, rp)
         raw.status = NewsStatus.MODERATION  # готовый пост ждёт опубликовать/править/отклонить
         session.flush()
@@ -115,12 +110,15 @@ def rewrite_and_get(raw_id: int) -> int | None:
         return rp.id
 
 
-def cancel_preview(raw_id: int) -> bool:
+def cancel_preview(raw_id: int, *, reason: str = "", editor_id: int | None = None,
+                   platform: str = "") -> bool:
     """По нажатию «Отменить»: отклоняем новость (сообщение удаляет бот)."""
     with session_scope() as session:
         raw = session.get(RawNews, raw_id)
-        if not raw:
+        if not raw or raw.status != NewsStatus.PREVIEW:
             return False
+        record_feedback(session, raw_id=raw.id, action="cancel", stage="selection",
+                        reason=reason, editor_id=editor_id, platform=platform)
         raw.status = NewsStatus.REJECTED
         log.info("preview_cancelled", raw_id=raw_id)
         return True
@@ -151,35 +149,47 @@ def get_preview(raw_id: int) -> dict | None:
 
 
 # ── Операции, вызываемые из бота ─────────────────────────────────────────────
-def approve(post_id: int) -> bool:
+def approve(post_id: int, *, editor_id: int | None = None, platform: str = "") -> bool:
     with session_scope() as session:
         rp = session.get(RewrittenPost, post_id)
         if not rp or not rp.raw:
             return False
-        if rp.raw.status in (NewsStatus.PUBLISHED, NewsStatus.REJECTED):
+        if rp.raw.status not in (NewsStatus.MODERATION, NewsStatus.APPROVED):
             return False  # уже обработано — не публикуем повторно
         if rp.media_mode == "unselected":
             return False
+        if rp.raw.status != NewsStatus.APPROVED:
+            record_feedback(session, raw_id=rp.raw_id, post_id=rp.id, action="approve",
+                            editor_id=editor_id, platform=platform, model=rp.model)
         rp.raw.status = NewsStatus.APPROVED
         log.info("moderation_approved", post_id=post_id)
         return True
 
 
-def reject(post_id: int) -> bool:
+def reject(post_id: int, *, reason: str = "", editor_id: int | None = None,
+           platform: str = "") -> bool:
     with session_scope() as session:
         rp = session.get(RewrittenPost, post_id)
-        if not rp or not rp.raw:
+        if not rp or not rp.raw or rp.raw.status != NewsStatus.MODERATION:
             return False
+        record_feedback(session, raw_id=rp.raw_id, post_id=rp.id, action="reject",
+                        reason=reason, editor_id=editor_id, platform=platform, model=rp.model)
         rp.raw.status = NewsStatus.REJECTED
         log.info("moderation_rejected", post_id=post_id)
         return True
 
 
-def apply_edit(post_id: int, new_text: str) -> bool:
+def apply_edit(post_id: int, new_text: str, *, editor_id: int | None = None,
+               platform: str = "", reason: str = "") -> bool:
+    if not new_text.strip():
+        return False
     with session_scope() as session:
         rp = session.get(RewrittenPost, post_id)
-        if not rp or not rp.raw:
+        if not rp or not rp.raw or rp.raw.status != NewsStatus.MODERATION:
             return False
+        record_feedback(session, raw_id=rp.raw_id, post_id=rp.id, action="edit",
+                        editor_id=editor_id, platform=platform, reason=reason, model=rp.model,
+                        text_before=rp.post_text, text_after=new_text)
         rp.post_text = new_text
         rp.edited_by_moderator = True
         # После существенной правки прежний выбор изображения мог потерять смысл.
@@ -194,7 +204,7 @@ def apply_edit(post_id: int, new_text: str) -> bool:
         return True
 
 
-def create_manual_post(text: str) -> int | None:
+def create_manual_post(text: str, *, editor_id: int | None = None, platform: str = "") -> int | None:
     """Создать готовую карточку из текста, который прислал редактор.
 
     Ручной материал намеренно проходит только городской рерайт и модерацию:
@@ -232,6 +242,8 @@ def create_manual_post(text: str) -> int | None:
         )
         session.add(post)
         session.flush()
+        record_feedback(session, raw_id=raw.id, post_id=post.id, action="generated",
+                        model=model, text_after=post_text, editor_id=editor_id, platform=platform)
         _recommend_visual(session, post)
         raw.status = NewsStatus.MODERATION
         session.flush()
@@ -275,7 +287,7 @@ def select_media(post_id: int, mode: str) -> bool:
         return False
     with session_scope() as session:
         rp = session.get(RewrittenPost, post_id)
-        if not rp or not rp.raw or rp.raw.status in (NewsStatus.PUBLISHED, NewsStatus.REJECTED):
+        if not rp or not rp.raw or rp.raw.status != NewsStatus.MODERATION:
             return False
         if mode == "original" and not raw_image_refs(rp.raw):
             return False
@@ -292,7 +304,7 @@ def generate_post_visual(post_id: int) -> bool:
 
     with session_scope() as session:
         rp = session.get(RewrittenPost, post_id)
-        if not rp or not rp.raw or rp.raw.status in (NewsStatus.PUBLISHED, NewsStatus.REJECTED):
+        if not rp or not rp.raw or rp.raw.status != NewsStatus.MODERATION:
             return False
         brief = rp.visual_prompt
         if not brief:
@@ -302,7 +314,7 @@ def generate_post_visual(post_id: int) -> bool:
     path = generate_visual_file(brief)
     with session_scope() as session:
         rp = session.get(RewrittenPost, post_id)
-        if not rp or not rp.raw or rp.raw.status in (NewsStatus.PUBLISHED, NewsStatus.REJECTED):
+        if not rp or not rp.raw or rp.raw.status != NewsStatus.MODERATION:
             return False
         rp.generated_image_path = path
         rp.media_mode = "generated"
@@ -340,6 +352,7 @@ def get_pending(post_id: int) -> dict | None:
             image_urls = source_images
         return {
             "post_id": rp.id,
+            "status": rp.raw.status.value,
             "post_text": rp.post_text,
             "is_manual": is_manual,
             # У авторского материала нет внешнего источника: не показываем

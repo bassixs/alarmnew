@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramRetryAfter
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 
 from aialarm.config import get_settings
 from aialarm.logging import get_logger
@@ -17,16 +18,22 @@ log = get_logger(__name__)
 _CARD_LIMIT = 3500
 
 
-def _keyboard(post_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="✅ Опубликовать", callback_data=f"mod:approve:{post_id}"),
-                InlineKeyboardButton(text="✏️ Править", callback_data=f"mod:edit:{post_id}"),
-                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"mod:reject:{post_id}"),
-            ]
-        ]
-    )
+def _keyboard(post_id: int, post: dict | None = None, *, visual: bool = False) -> InlineKeyboardMarkup:
+    if post and (visual or post.get("media_mode") == "unselected"):
+        from aialarm.moderation.max_client import visual_choice_buttons
+
+        rows = [[InlineKeyboardButton(text=button["text"], callback_data=button["payload"])
+                 for button in row] for row in visual_choice_buttons(post_id, post)]
+        rows.append([
+            InlineKeyboardButton(text="✏️ Править", callback_data=f"mod:edit:{post_id}"),
+            InlineKeyboardButton(text="❌ Отклонить", callback_data=f"mod:reject:{post_id}"),
+        ])
+        return InlineKeyboardMarkup(inline_keyboard=rows)
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Опубликовать", callback_data=f"mod:approve:{post_id}"),
+        InlineKeyboardButton(text="✏️ Править", callback_data=f"mod:edit:{post_id}"),
+        InlineKeyboardButton(text="❌ Отклонить", callback_data=f"mod:reject:{post_id}"),
+    ], [InlineKeyboardButton(text="🖼 Изменить картинку", callback_data=f"mod:media:{post_id}")]])
 
 
 def _card_text(p: dict) -> str:
@@ -89,18 +96,25 @@ async def _send(post_id: int) -> None:
         return
     bot = Bot(token)
     try:
+        refs = list(dict.fromkeys(p.get("image_urls") or []))[:10]
+        if refs:
+            media = [FSInputFile(ref) if Path(ref).is_file() else ref for ref in refs]
+            if len(media) == 1:
+                await bot.send_photo(chat_id, photo=media[0])
+            else:
+                await bot.send_media_group(chat_id, media=[InputMediaPhoto(media=ref) for ref in media])
         # При флуд-контроле Telegram ждём указанное время и повторяем.
         for _ in range(4):
             try:
                 await bot.send_message(
-                    chat_id, _card_text(p), reply_markup=_keyboard(post_id), parse_mode=None
+                    chat_id, _card_text(p), reply_markup=_keyboard(post_id, p), parse_mode=None
                 )
                 return
             except TelegramRetryAfter as e:
                 await asyncio.sleep(e.retry_after + 1)
         # последняя попытка — пусть пробросит исключение наверх
         await bot.send_message(
-            chat_id, _card_text(p), reply_markup=_keyboard(post_id), parse_mode=None
+            chat_id, _card_text(p), reply_markup=_keyboard(post_id, p), parse_mode=None
         )
     finally:
         await bot.session.close()
@@ -201,8 +215,7 @@ async def _send_preview_tg(raw_id: int) -> None:
     s = get_settings()
     token, chat_id = s.secrets.telegram_bot_token, s.project.moderation.admin_chat_id
     if not token or not chat_id:
-        log.warning("preview_notify_skip", reason="нет токена или admin_chat_id")
-        return
+        raise RuntimeError("Нет Telegram токена или admin_chat_id для доставки карточки")
     p = get_preview(raw_id)
     if not p:
         return
@@ -226,8 +239,7 @@ def _send_preview_max(raw_id: int) -> None:
 
     chat = get_settings().project.moderation.max_chat_id
     if not chat:
-        log.warning("preview_notify_skip", reason="нет max_chat_id")
-        return
+        raise RuntimeError("Нет max_chat_id для доставки карточки")
     p = get_preview(raw_id)
     if not p:
         return
@@ -275,8 +287,7 @@ def send_district_preview(post_id: int) -> None:
     chat = get_settings().project.districts.moderation_max_chat_id
     p = get_district_preview(post_id)
     if not chat or not p:
-        log.warning("district_preview_notify_skip", post_id=post_id)
-        return
+        raise RuntimeError("Нет районного чата или карточки для доставки")
     max_client.send_message(
         chat, _district_preview_text(p), buttons=max_client.district_preview_buttons(post_id),
         image_refs=(p.get("image_urls") or [])[:1],

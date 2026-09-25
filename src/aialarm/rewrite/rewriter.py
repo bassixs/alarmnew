@@ -160,6 +160,11 @@ def rewrite_one(session: Session, raw: RawNews) -> RewrittenPost:
         source_attribution=attribution,
     )
     session.add(post)
+    session.flush()
+    from aialarm.moderation.feedback import record_feedback
+
+    record_feedback(session, raw_id=raw.id, post_id=post.id, action="generated",
+                    model=post.model, text_after=post_text)
     raw.status = NewsStatus.REWRITTEN
     log.info("rewritten", raw_id=raw.id, length=len(post_text))
     return post

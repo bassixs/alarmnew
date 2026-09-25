@@ -35,6 +35,7 @@ from aialarm.control import (
 )
 from aialarm.logging import get_logger
 from aialarm.moderation import districts, max_client, service
+from aialarm.moderation.feedback import REJECTION_REASONS, reason_buttons
 from aialarm.moderation.notify import (
     edit_card, edit_district_card, edit_visual_choices, finalize_card, finalize_district_card,
     send_card,
@@ -311,6 +312,38 @@ def _handle_control(
     _send_control_panel(message_id=message_id, notice=notice)
 
 
+def _show_rejection(prefix: str, action: str, object_id: int, message_id: str,
+                    *, back: bool = False) -> None:
+    from aialarm.moderation.notify import (
+        _card_buttons, _card_text, _district_card_text, _district_preview_text, _preview_text,
+    )
+
+    is_district = prefix == "dreason"
+    if is_district:
+        post = districts.get_district_pending(object_id)
+        render = _district_preview_text if action == "cancel" else _district_card_text
+        buttons = (max_client.district_preview_buttons(object_id) if action == "cancel"
+                   else max_client.district_callback_buttons(object_id))
+        chat = get_settings().project.districts.moderation_max_chat_id
+    else:
+        post = service.get_preview(object_id) if action == "cancel" else service.get_pending(object_id)
+        render = _preview_text if action == "cancel" else _card_text
+        buttons = (max_client.preview_buttons(object_id) if action == "cancel"
+                   else _card_buttons(object_id, post or {}))
+        chat = get_settings().project.moderation.max_chat_id
+    if not post:
+        return
+    text = render(post)
+    if not back:
+        text = "Выберите причину отказа:\n\n" + text
+        buttons = reason_buttons(prefix, action, object_id)
+    refs = post.get("image_urls") or []
+    if is_district:
+        refs = refs[:1]
+    if not max_client.edit_message(message_id, text, buttons=buttons, image_refs=refs):
+        max_client.send_message(chat, text, buttons=buttons, image_refs=refs)
+
+
 def _handle_callback(update: dict) -> None:
     cb = update.get("callback") or {}
     payload = cb.get("payload", "")
@@ -319,6 +352,36 @@ def _handle_callback(update: dict) -> None:
     mid = ((update.get("message") or {}).get("body") or {}).get("mid")
     prefix, action, id_s = (payload.split(":") + ["", ""])[:3]
     obj_id = int(id_s) if id_s.isdigit() else None
+
+    if obj_id is not None and (prefix, action) in {
+        ("pre", "cancel"), ("mod", "reject"), ("dpre", "cancel"), ("dmod", "reject"),
+    }:
+        max_client.answer_callback(cid, "Выберите причину отказа")
+        _show_rejection("dreason" if prefix.startswith("d") else "reason",
+                        action, obj_id, mid or "")
+        return
+    if prefix in {"reason", "dreason"} and obj_id is not None:
+        parts = payload.split(":")
+        code = parts[3] if len(parts) == 4 else ""
+        if action not in {"cancel", "reject"}:
+            return
+        if code == "back":
+            max_client.answer_callback(cid, "Возвращаю карточку")
+            _show_rejection(prefix, action, obj_id, mid or "", back=True)
+            return
+        if code not in REJECTION_REASONS:
+            return
+        reason = REJECTION_REASONS[code]
+        if prefix == "dreason":
+            operation = _cancel_district_post if action == "cancel" else _reject_district_post
+            submit = _submit_district_action
+        else:
+            operation = _cancel_preview if action == "cancel" else _reject_post
+            submit = _submit_post_action
+        if not submit(obj_id, lambda: operation(obj_id, mid or "", reason=reason,
+                                               editor_id=user_id), cid, "Отклонено"):
+            max_client.answer_callback(cid, "Уже обрабатываю…")
+        return
 
     if prefix == "ctl":
         _handle_control(action, user_id, cid, mid or "")
@@ -337,7 +400,7 @@ def _handle_callback(update: dict) -> None:
                 max_client.answer_callback(cid, "Районный помощник сейчас вне смены")
                 return
             if not _submit_district_action(
-                obj_id, lambda: _rewrite_district_preview(obj_id, mid or ""), cid, "✍️ Переписываю…"
+                obj_id, lambda: _rewrite_district_preview(obj_id, mid or "", user_id), cid, "✍️ Переписываю…"
             ):
                 max_client.answer_callback(cid, "⏳ Уже переписываю…")
         elif action == "cancel":
@@ -356,7 +419,7 @@ def _handle_callback(update: dict) -> None:
             confirmation = "⏳ Публикую в MAX…" if selected_targets == ["max"] else "⏳ Публикую в MAX и ТГ…"
             if not _submit_district_action(
                 obj_id,
-                lambda: _publish_district_post(obj_id, mid or "", selected_targets),
+                lambda: _publish_district_post(obj_id, mid or "", selected_targets, user_id),
                 cid,
                 confirmation,
             ):
@@ -383,7 +446,7 @@ def _handle_callback(update: dict) -> None:
                 max_client.answer_callback(cid, "Помощник сейчас вне смены")
                 return
             if not _submit_post_action(
-                obj_id, lambda: _rewrite_preview(obj_id, mid or ""), cid, "✍️ Переписываю…"
+                obj_id, lambda: _rewrite_preview(obj_id, mid or "", user_id), cid, "✍️ Переписываю…"
             ):
                 max_client.answer_callback(cid, "⏳ Уже переписываю…")
                 return
@@ -437,7 +500,7 @@ def _handle_callback(update: dict) -> None:
         confirmation = "⏳ Публикую в MAX…" if selected_targets else "⏳ Публикую в MAX и ТГ…"
         if not _submit_post_action(
             post_id,
-            lambda: _approve_and_publish(post_id, mid or "", selected_targets),
+            lambda: _approve_and_publish(post_id, mid or "", selected_targets, user_id),
             cid,
             confirmation,
         ):
@@ -461,8 +524,8 @@ def _handle_callback(update: dict) -> None:
         finalize_card(post_id, mid or "", "✏️ ЖДУ ИСПРАВЛЕННЫЙ ТЕКСТ…")
 
 
-def _rewrite_preview(raw_id: int, message_id: str) -> None:
-    post_id = service.rewrite_and_get(raw_id)
+def _rewrite_preview(raw_id: int, message_id: str, editor_id: int | None = None) -> None:
+    post_id = service.rewrite_and_get(raw_id, editor_id=editor_id, platform="max")
     if not post_id:
         return
     converted = bool(message_id and edit_card(post_id, message_id))
@@ -474,28 +537,29 @@ def _rewrite_preview(raw_id: int, message_id: str) -> None:
             max_client.delete_message(message_id)
 
 
-def _cancel_preview(raw_id: int, message_id: str) -> None:
-    service.cancel_preview(raw_id)
-    if message_id:
+def _cancel_preview(raw_id: int, message_id: str, *, reason: str = "",
+                    editor_id: int | None = None) -> None:
+    if service.cancel_preview(raw_id, reason=reason, editor_id=editor_id, platform="max") and message_id:
         max_client.delete_message(message_id)
 
 
-def _rewrite_district_preview(post_id: int, message_id: str) -> None:
-    if not districts.rewrite_district_post(post_id):
+def _rewrite_district_preview(post_id: int, message_id: str, editor_id: int | None = None) -> None:
+    if not districts.rewrite_district_post(post_id, editor_id=editor_id):
         return
     if not edit_district_card(post_id, message_id):
         log.warning("district_card_edit_failed", post_id=post_id)
 
 
-def _cancel_district_post(post_id: int, message_id: str) -> None:
-    if districts.cancel_district_post(post_id) and message_id:
+def _cancel_district_post(post_id: int, message_id: str, *, reason: str = "",
+                          editor_id: int | None = None) -> None:
+    if districts.cancel_district_post(post_id, reason=reason, editor_id=editor_id) and message_id:
         max_client.delete_message(message_id)
 
 
 def _publish_district_post(
-    post_id: int, message_id: str, selected_targets: list[str]
+    post_id: int, message_id: str, selected_targets: list[str], editor_id: int | None = None
 ) -> None:
-    ok, reason = districts.publish_district_post(post_id, selected_targets)
+    ok, reason = districts.publish_district_post(post_id, selected_targets, editor_id=editor_id)
     if ok:
         finalize_district_card(post_id, message_id, "✅ ОПУБЛИКОВАНО")
     else:
@@ -508,8 +572,9 @@ def _publish_district_post(
             _send_district_quota_notice(post["district_id"])
 
 
-def _reject_district_post(post_id: int, message_id: str) -> None:
-    if districts.cancel_district_post(post_id):
+def _reject_district_post(post_id: int, message_id: str, *, reason: str = "",
+                          editor_id: int | None = None) -> None:
+    if districts.cancel_district_post(post_id, reason=reason, editor_id=editor_id):
         finalize_district_card(post_id, message_id, "❌ ОТКЛОНЕНО")
 
 
@@ -517,14 +582,17 @@ def _approve_and_publish(
     post_id: int,
     message_id: str,
     selected_targets: list[str] | None = None,
+    editor_id: int | None = None,
 ) -> None:
-    if not service.approve(post_id):
+    post = service.get_pending(post_id)
+    if not post or post["status"] not in {"moderation", "approved"}:
         return
-    ok = publish_post_id_sync(post_id, selected_targets)
+    ok = publish_post_id_sync(post_id, selected_targets, approve=True,
+                              editor_id=editor_id, moderation_platform="max")
     header = (
         "✅ ОПУБЛИКОВАНО"
         if ok
-        else "⚠️ Не опубликовано на всех площадках — повтор будет автоматически"
+        else "⏳ В ОЧЕРЕДИ — повтор с учётом лимитов и доступности площадок"
     )
     finalize_card(post_id, message_id, header)
 
@@ -545,14 +613,15 @@ def _generate_post_visual(post_id: int, message_id: str) -> None:
             max_client.send_message(chat, "⚠️ Не удалось сгенерировать картинку. Выберите другой вариант.")
 
 
-def _reject_post(post_id: int, message_id: str) -> None:
-    service.reject(post_id)
-    finalize_card(post_id, message_id, "❌ ОТКЛОНЕНО")
+def _reject_post(post_id: int, message_id: str, *, reason: str = "",
+                 editor_id: int | None = None) -> None:
+    if service.reject(post_id, reason=reason, editor_id=editor_id, platform="max"):
+        finalize_card(post_id, message_id, "❌ ОТКЛОНЕНО")
 
 
-def _create_own_post(text: str) -> None:
+def _create_own_post(text: str, editor_id: int | None = None) -> None:
     try:
-        post_id = service.create_manual_post(text)
+        post_id = service.create_manual_post(text, editor_id=editor_id, platform="max")
         if not post_id:
             return
         send_card(post_id)
@@ -585,7 +654,7 @@ def _handle_message(msg: dict) -> None:
         return
     if user_id in _district_edit_state and text:
         post_id, card_mid = _district_edit_state.pop(user_id)
-        if not districts.edit_district_post(post_id, text):
+        if not districts.edit_district_post(post_id, text, editor_id=user_id):
             log.warning("district_edit_save_failed", post_id=post_id)
             return
         if not edit_district_card(post_id, card_mid):
@@ -598,11 +667,11 @@ def _handle_message(msg: dict) -> None:
             max_client.send_message(main_chat, "⏸ Помощник сейчас вне смены. Включите его в панели /bot.")
             return
         max_client.send_message(main_chat, "✍️ Переписываю свой пост…")
-        _actions.submit(_create_own_post, text)
+        _actions.submit(_create_own_post, text, user_id)
         return
     if user_id in _edit_state and text:
         post_id, card_mid = _edit_state.pop(user_id)
-        if not service.apply_edit(post_id, text):
+        if not service.apply_edit(post_id, text, editor_id=user_id, platform="max"):
             log.warning("edit_save_failed", post_id=post_id)
             return
         # Возвращаем редактору тот же выбор площадки уже с исправленным текстом.
