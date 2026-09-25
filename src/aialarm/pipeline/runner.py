@@ -10,6 +10,7 @@ import asyncio
 from datetime import datetime, timezone
 
 from aialarm.collectors import build_collector, store_items
+from aialarm.collectors.store import cache_collected_images
 from aialarm.config import SourceCfg, district_channel, get_settings
 from aialarm.control import get_district_publish_profile
 from aialarm.filtering import run_filter_stage
@@ -58,6 +59,7 @@ async def run_collection(
     fetched = await asyncio.gather(*[_fetch_source(s) for s in active])
     inserted = 0
     outside_window = 0
+    accepted_items = []
     for items in fetched:
         if published_since is not None:
             accepted = [
@@ -68,8 +70,14 @@ async def run_collection(
             items = accepted
         try:
             inserted += store_items(items)["inserted"]
+            accepted_items.extend(items)
         except Exception as e:  # noqa: BLE001
             log.error("store_items_failed", error=str(e))
+    # All text is durable before an optional image request starts.
+    try:
+        await cache_collected_images(accepted_items)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("image_cache_failed", error=str(exc))
     total = {
         "sources": len(active),
         "inserted": inserted,

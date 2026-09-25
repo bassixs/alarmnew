@@ -1,11 +1,13 @@
 """Сохранение собранных новостей в raw_news с дедупликацией."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from sqlalchemy import select
 
 from aialarm.collectors.base import CollectedItem
 from aialarm.collectors.dedup import dedup_text, find_semantic_duplicate
-from aialarm.collectors.images import download_and_store
+from aialarm.collectors.images import cached_image_path, download_images
 from aialarm.config import get_settings
 from aialarm.db import session_scope
 from aialarm.db.models import NewsStatus, RawNews
@@ -15,6 +17,10 @@ from aialarm.media import MAX_IMAGES_PER_POST, raw_image_refs
 from aialarm.source_policy import source_matches, visual_allowed
 
 log = get_logger(__name__)
+_ACTIVE_MEDIA_STATUSES = {
+    NewsStatus.NEW, NewsStatus.RELEVANT, NewsStatus.PREVIEW,
+    NewsStatus.REWRITTEN, NewsStatus.MODERATION, NewsStatus.APPROVED,
+}
 
 
 def _item_image_urls(item: CollectedItem) -> list[str]:
@@ -26,23 +32,26 @@ def _item_image_urls(item: CollectedItem) -> list[str]:
     return urls[:MAX_IMAGES_PER_POST]
 
 
-def _download_item_images(item: CollectedItem, key: str) -> list[str]:
+def _cached_item_images(item: CollectedItem, key: str) -> list[str]:
     if not visual_allowed(item.source_url):
         return []
     refs: list[str] = []
     for index, url in enumerate(_item_image_urls(item)):
         image_key = f"{key[:24]}-{index:02d}"
-        ref = download_and_store(url, image_key)
+        ref = cached_image_path(image_key)
         if ref:
             refs.append(ref)
     return refs
 
 
 def _backfill_images(raw: RawNews, item: CollectedItem) -> None:
-    expected = _item_image_urls(item)
-    if not expected or len(raw_image_refs(raw)) >= len(expected):
+    if raw.status not in _ACTIVE_MEDIA_STATUSES:
         return
-    refs = _download_item_images(item, raw.dedup_key)
+    expected = _item_image_urls(item)
+    existing = [ref for ref in raw_image_refs(raw) if Path(ref).is_file()]
+    if not expected or len(existing) >= len(expected):
+        return
+    refs = list(dict.fromkeys(existing + _cached_item_images(item, raw.dedup_key)))[:MAX_IMAGES_PER_POST]
     if refs:
         raw.image_urls = refs
         raw.image_url = refs[0]
@@ -72,10 +81,11 @@ def store_items(items: list[CollectedItem]) -> dict[str, int]:
                 continue
 
             emb = embedder.embed(dedup_text(item.title, item.body))
-            dup_id, score = find_semantic_duplicate(session, emb, threshold)
+            dup_id, _ = find_semantic_duplicate(session, emb, threshold)
 
-            # Качаем весь альбом сразу: ссылки превью t.me быстро истекают.
-            image_refs = _download_item_images(item, key)
+            # Text must commit even if Telegram's image CDN is unavailable.
+            # Networking happens later in cache_collected_images, outside this transaction.
+            image_refs = _cached_item_images(item, key) if dup_id is None else []
 
             row = RawNews(
                 dedup_key=key,
@@ -111,4 +121,34 @@ def _maybe_enrich_original(session, original_id: int, item: CollectedItem) -> No
         return
     if len(item.body or "") > len(original.body or ""):
         original.body = item.body
-    _backfill_images(original, item)
+
+
+async def cache_collected_images(items: list[CollectedItem]) -> int:
+    """Download only active cards' missing media, after committing every source."""
+    by_key = {item.dedup_key(): item for item in items if _item_image_urls(item)}
+    if not by_key:
+        return 0
+    requests: dict[str, str] = {}
+    candidates: dict[int, CollectedItem] = {}
+    with session_scope() as session:
+        rows = session.scalars(select(RawNews).where(
+            RawNews.dedup_key.in_(by_key), RawNews.status.in_(_ACTIVE_MEDIA_STATUSES),
+        )).all()
+        for raw in rows:
+            item = by_key[raw.dedup_key]
+            if not visual_allowed(raw.source_url):
+                continue
+            expected = _item_image_urls(item)
+            existing = [ref for ref in raw_image_refs(raw) if Path(ref).is_file()]
+            if len(existing) >= len(expected):
+                continue
+            candidates[raw.id] = item
+            for index, url in enumerate(expected):
+                requests[f"{raw.dedup_key[:24]}-{index:02d}"] = url
+    saved = await download_images(requests)
+    with session_scope() as session:
+        for raw_id, item in candidates.items():
+            raw = session.get(RawNews, raw_id)
+            if raw:
+                _backfill_images(raw, item)
+    return len(saved)
