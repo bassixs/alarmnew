@@ -89,7 +89,7 @@ def run_collection_sync(
 
 def run_processing() -> dict[str, dict]:
     """Стадии после сбора: фильтр -> карточки-оригиналы на модерацию -> публикация
-    одобренных. Рерайт (Sonnet) — по кнопке «Переписать» в боте, не здесь."""
+    одобренных. Рерайт — по кнопке «Переписать» в боте, не здесь."""
     result = {
         "filter": run_filter_stage(),
         "preview": route_previews(),

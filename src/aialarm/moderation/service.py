@@ -54,7 +54,7 @@ def route_previews(
     collected_since: datetime | None = None,
 ) -> dict[str, int]:
     """RELEVANT -> PREVIEW: шлём модератору ОРИГИНАЛ (без рерайта) с кнопками
-    «Переписать»/«Отменить». Рерайт (Sonnet) откладывается до нажатия «Переписать» —
+    «Переписать»/«Отменить». Рерайт откладывается до нажатия «Переписать» —
     не тратим деньги на посты, которые не возьмут."""
     stats = {"to_preview": 0, "auto_approved": 0}
     with session_scope() as session:
@@ -86,7 +86,7 @@ def route_previews(
 
 
 def rewrite_and_get(raw_id: int, *, editor_id: int | None = None, platform: str = "") -> int | None:
-    """По нажатию «Переписать»: переписываем оригинал (Sonnet), возвращаем post_id
+    """По нажатию «Переписать»: переписываем оригинал, возвращаем post_id
     готового поста. Если уже переписан — возвращаем существующий (без повтора)."""
     from aialarm.rewrite.rewriter import rewrite_one
 
@@ -252,7 +252,7 @@ def create_manual_post(text: str, *, editor_id: int | None = None, platform: str
 
 
 def _recommend_visual(session: Session, rp: RewrittenPost) -> None:
-    """Записать совет GPT Luna, но не принимать решение за модератора."""
+    """Записать совет визуального агента, но не принимать решение за модератора."""
     from aialarm.visuals import recommend_visual
 
     raw = rp.raw

@@ -55,6 +55,13 @@ python scripts/telethon_login.py
 
 ## Конфигурация
 
+Текущие модели через AiTunnel:
+
+- отбор, рерайт (включая районные каналы) и рекомендация визуала —
+  [`gpt-6-luna-pro`](https://aitunnel.ru/models/gpt-6-luna-pro);
+- генерация изображений —
+  [`gpt-image-2.5-sunburst`](https://aitunnel.ru/models/gpt-image-2-5-sunburst), 1024×1024.
+
 - **Секреты** — только в `.env` (ключи, токены, DATABASE_URL).
 - **Параметры** — в `config.yaml` (каналы, источники, тезисы, стоп-слова, тон, лимиты).
   См. подробные комментарии в `config.example.yaml`.
